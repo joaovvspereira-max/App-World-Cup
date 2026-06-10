@@ -8,7 +8,12 @@ import streamlit as st
 
 from database.auth import AuthError, login_utilizador, registar_utilizador
 from database.jogos import get_jogos
-from database.palpites import get_palpites_utilizador, guardar_palpites_em_lote, get_ranking
+from database.palpites import (
+    get_palpites_utilizador,
+    guardar_palpites_em_lote,
+    submeter_palpite,
+    get_ranking,
+)
 from database.palpites_macro import (
     JOGADORES_ELITE,
     OPCAO_OUTRO,
