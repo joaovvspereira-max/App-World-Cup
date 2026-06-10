@@ -8,6 +8,13 @@ import streamlit as st
 from database.auth import AuthError, login_utilizador, registar_utilizador
 from database.jogos import get_jogos
 from database.palpites import get_palpites_utilizador, guardar_palpites_em_lote
+from database.palpites_macro import (
+    JOGADORES_ELITE,
+    OPCAO_OUTRO,
+    PAISES_ELITE,
+    get_palpite_macro,
+    guardar_palpite_macro,
+)
 
 st.set_page_config(
     page_title="Mundial 2026",
@@ -125,6 +132,101 @@ def formatar_resultado_real(jogo: dict[str, Any]) -> str | None:
     if golos_casa is None or golos_fora is None:
         return None
     return f"{int(golos_casa)} - {int(golos_fora)}"
+
+
+def preparar_opcao_selectbox(valor_guardado: str | None, opcoes: list[str]) -> tuple[int, str]:
+    """Define o índice do selectbox e o texto personalizado para a opção 'Outro...'."""
+    opcoes_fixas = opcoes[:-1]
+    if valor_guardado and valor_guardado not in opcoes_fixas:
+        return len(opcoes) - 1, valor_guardado
+    if valor_guardado in opcoes_fixas:
+        return opcoes_fixas.index(valor_guardado), ""
+    return 0, ""
+
+
+def resolver_valor_previsao(selecionado: str, outro_texto: str) -> str:
+    """Devolve o valor final escolhido no selectbox ou no campo 'Outro...'."""
+    if selecionado == OPCAO_OUTRO:
+        return outro_texto.strip()
+    return selecionado.strip()
+
+
+def renderizar_previsoes_macro() -> None:
+    """Secção de previsões especiais: campeão do mundial e melhor marcador."""
+    st.subheader("Previsões de Campeão e Melhor Marcador")
+
+    if not utilizador_autenticado():
+        st.caption("Inicia sessão na barra lateral para guardar as tuas previsões especiais.")
+        return
+
+    try:
+        palpite_macro = get_palpite_macro(st.session_state.user_id)
+    except Exception as exc:
+        st.error(f"Não foi possível carregar as tuas previsões especiais: {exc}")
+        return
+
+    idx_vencedor, outro_vencedor = preparar_opcao_selectbox(
+        palpite_macro.get("vencedor_mundial") if palpite_macro else None,
+        PAISES_ELITE,
+    )
+    idx_marcador, outro_marcador = preparar_opcao_selectbox(
+        palpite_macro.get("melhor_marcador") if palpite_macro else None,
+        JOGADORES_ELITE,
+    )
+
+    with st.form("form_palpites_macro"):
+        vencedor_selecionado = st.selectbox(
+            "Vencedor do Mundial",
+            PAISES_ELITE,
+            index=idx_vencedor,
+        )
+        vencedor_outro = ""
+        if vencedor_selecionado == OPCAO_OUTRO:
+            vencedor_outro = st.text_input(
+                "Indica o país",
+                value=outro_vencedor,
+                placeholder="Escreve o nome do país",
+            )
+
+        marcador_selecionado = st.selectbox(
+            "Melhor Marcador",
+            JOGADORES_ELITE,
+            index=idx_marcador,
+        )
+        marcador_outro = ""
+        if marcador_selecionado == OPCAO_OUTRO:
+            marcador_outro = st.text_input(
+                "Indica o jogador",
+                value=outro_marcador,
+                placeholder="Escreve o nome do jogador",
+            )
+
+        guardar_macro = st.form_submit_button(
+            "Guardar previsões especiais",
+            use_container_width=True,
+        )
+
+    if palpite_macro and palpite_macro.get("atualizado_em"):
+        st.caption(f"Última atualização: {palpite_macro['atualizado_em']}")
+
+    if guardar_macro:
+        vencedor = resolver_valor_previsao(vencedor_selecionado, vencedor_outro)
+        marcador = resolver_valor_previsao(marcador_selecionado, marcador_outro)
+
+        if not vencedor or not marcador:
+            st.error("Preenche o vencedor do mundial e o melhor marcador.")
+            return
+
+        try:
+            guardar_palpite_macro(
+                user_id=st.session_state.user_id,
+                vencedor_mundial=vencedor,
+                melhor_marcador=marcador,
+            )
+            st.success("Previsões especiais guardadas com sucesso.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Erro ao guardar previsões especiais: {exc}")
 
 
 def renderizar_auth() -> None:
@@ -321,4 +423,6 @@ st.markdown(
 if not utilizador_autenticado():
     st.info("Inicia sessão na barra lateral para editar e guardar palpites.")
 
+renderizar_previsoes_macro()
+st.divider()
 exibir_jogos()

@@ -31,6 +31,15 @@ CREATE TABLE palpites (
     UNIQUE (utilizador_id, jogo_id)
 );
 
+-- Previsões especiais por utilizador (vencedor e melhor marcador)
+CREATE TABLE palpites_macro (
+    id SERIAL PRIMARY KEY,
+    user_id uuid REFERENCES perfis(id) ON DELETE CASCADE UNIQUE,
+    vencedor_mundial TEXT NOT NULL,
+    melhor_marcador TEXT NOT NULL,
+    atualizado_em TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Dados de exemplo (opcional)
 INSERT INTO jogos (equipa_casa, equipa_fora, fase, data, grupo, cidade) VALUES
     ('Portugal', 'Brasil', 'Grupos', '2026-06-15', 'H', 'Los Angeles'),
