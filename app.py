@@ -3,11 +3,12 @@
 from datetime import date, datetime
 from typing import Any
 
+import pandas as pd
 import streamlit as st
 
 from database.auth import AuthError, login_utilizador, registar_utilizador
 from database.jogos import get_jogos
-from database.palpites import get_palpites_utilizador, guardar_palpites_em_lote
+from database.palpites import get_palpites_utilizador, guardar_palpites_em_lote, get_ranking
 from database.palpites_macro import (
     JOGADORES_ELITE,
     OPCAO_OUTRO,
@@ -229,6 +230,47 @@ def renderizar_previsoes_macro() -> None:
             st.error(f"Erro ao guardar previsões especiais: {exc}")
 
 
+def renderizar_ranking() -> None:
+    """Secção de Ranking: tabela principal e expanders por utilizador."""
+    st.subheader("Ranking — Classificação Geral")
+
+    try:
+        ranking = get_ranking()
+    except Exception as exc:
+        st.error(f"Não foi possível carregar o ranking: {exc}")
+        return
+
+    if not ranking:
+        st.info("Ainda não existem palpites com resultados para compilar o ranking.")
+        return
+
+    # DataFrame para a tabela de liderança
+    df = pd.DataFrame(
+        [{"Nome": r.get("nome"), "Pontos": r.get("pontos_totais", 0)} for r in ranking]
+    )
+    df = df.sort_values(by="Pontos", ascending=False).reset_index(drop=True)
+
+    st.dataframe(df, use_container_width=True)
+
+    # Expanders com detalhe por utilizador (apenas jogos finalizados aparecem no detalhe)
+    for usuario in ranking:
+        nome = usuario.get("nome")
+        pontos = usuario.get("pontos_totais", 0)
+        detalhes = usuario.get("palpites", [])
+        bonus = usuario.get("bonus_aplicado", 0)
+
+        with st.expander(f"{nome} — {pontos} pts{' (+' + str(bonus) + ' bonus)' if bonus else ''}"):
+            if not detalhes:
+                st.write("Sem palpites finalizados.")
+                continue
+            detalhes_df = pd.DataFrame(detalhes)
+            # Coloca a descrição do jogo como primeira coluna
+            detalhes_df["Jogo"] = detalhes_df.apply(lambda r: f"{r['equipa_casa']} vs {r['equipa_fora']}", axis=1)
+            detalhes_df = detalhes_df[["Jogo", "palpite", "resultado_real", "pontos"]]
+            detalhes_df = detalhes_df.rename(columns={"palpite": "Palpite", "resultado_real": "Resultado Real", "pontos": "Pontos"})
+            st.table(detalhes_df)
+
+
 def renderizar_auth() -> None:
     """Formulário de login e registo na barra lateral."""
     with st.sidebar:
@@ -317,67 +359,80 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
         return
 
     palpites_submetidos: list[dict[str, int]] = []
-
     with st.form("form_palpites"):
         for jogo in jogos:
             jogo_id = jogo["id"]
             palpite = palpites_existentes.get(jogo_id, {})
 
-            st.markdown(
-                f'<p class="jogo-meta">{formatar_info_jogo(jogo)}</p>',
-                unsafe_allow_html=True,
-            )
-
-            col_casa, col_golos_casa, col_sep, col_golos_fora, col_fora = st.columns(
-                [3, 1, 0.4, 1, 3]
-            )
-
-            with col_casa:
+            # Card container
+            with st.container():
                 st.markdown(
-                    f'<p class="jogo-equipa">{jogo.get("equipa_casa", "—")}</p>',
+                    f'<p class="jogo-meta">{formatar_info_jogo(jogo)}</p>',
                     unsafe_allow_html=True,
                 )
-            with col_golos_casa:
-                golos_casa = st.number_input(
-                    "Golos casa",
-                    min_value=0,
-                    step=1,
-                    value=int(palpite.get("golos_casa") or 0),
-                    key=f"golos_casa_{jogo_id}",
-                    label_visibility="collapsed",
+
+                col_casa, col_golos_casa, col_sep, col_golos_fora, col_fora = st.columns(
+                    [3, 1, 0.4, 1, 3]
                 )
-            with col_sep:
-                st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
-            with col_golos_fora:
-                golos_fora = st.number_input(
-                    "Golos fora",
-                    min_value=0,
-                    step=1,
-                    value=int(palpite.get("golos_fora") or 0),
-                    key=f"golos_fora_{jogo_id}",
-                    label_visibility="collapsed",
-                )
-            with col_fora:
-                st.markdown(
-                    f'<p class="jogo-equipa">{jogo.get("equipa_fora", "—")}</p>',
-                    unsafe_allow_html=True,
-                )
+
+                with col_casa:
+                    st.markdown(
+                        f'<p class="jogo-equipa">{jogo.get("equipa_casa", "—")}</p>',
+                        unsafe_allow_html=True,
+                    )
+                with col_golos_casa:
+                    golos_casa = st.number_input(
+                        "Golos casa",
+                        min_value=0,
+                        step=1,
+                        value=int(palpite.get("golos_casa") or 0),
+                        key=f"golos_casa_{jogo_id}",
+                        label_visibility="collapsed",
+                    )
+                with col_sep:
+                    st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
+                with col_golos_fora:
+                    golos_fora = st.number_input(
+                        "Golos fora",
+                        min_value=0,
+                        step=1,
+                        value=int(palpite.get("golos_fora") or 0),
+                        key=f"golos_fora_{jogo_id}",
+                        label_visibility="collapsed",
+                    )
+                with col_fora:
+                    st.markdown(
+                        f'<p class="jogo-equipa">{jogo.get("equipa_fora", "—")}</p>',
+                        unsafe_allow_html=True,
+                    )
 
             palpites_submetidos.append(
                 {
                     "jogo_id": jogo_id,
-                    "golos_casa": golos_casa,
-                    "golos_fora": golos_fora,
+                    "golos_casa": st.session_state.get(f"golos_casa_{jogo_id}", int(palpite.get("golos_casa") or 0)),
+                    "golos_fora": st.session_state.get(f"golos_fora_{jogo_id}", int(palpite.get("golos_fora") or 0)),
                 }
             )
             st.divider()
 
-        guardar = st.form_submit_button("Guardar todos os palpites", use_container_width=True)
+        guardar = st.form_submit_button("Guardar Palpites", use_container_width=True)
 
     if guardar:
         try:
-            guardar_palpites_em_lote(st.session_state.user_id, palpites_submetidos)
-            st.success(f"{len(palpites_submetidos)} palpite(s) guardado(s) com sucesso.")
+            # Recolecta valores actuais dos inputs (em st.session_state)
+            payloads = []
+            for p in palpites_submetidos:
+                jid = p["jogo_id"]
+                payloads.append(
+                    {
+                        "jogo_id": jid,
+                        "golos_casa": int(st.session_state.get(f"golos_casa_{jid}", 0)),
+                        "golos_fora": int(st.session_state.get(f"golos_fora_{jid}", 0)),
+                    }
+                )
+
+            guardar_palpites_em_lote(st.session_state.user_id, payloads)
+            st.success(f"{len(payloads)} palpite(s) guardado(s) com sucesso.")
             st.rerun()
         except Exception as exc:
             st.error(f"Erro ao guardar palpites: {exc}")
@@ -424,5 +479,7 @@ if not utilizador_autenticado():
     st.info("Inicia sessão na barra lateral para editar e guardar palpites.")
 
 renderizar_previsoes_macro()
+st.divider()
+renderizar_ranking()
 st.divider()
 exibir_jogos()
