@@ -324,6 +324,7 @@ def renderizar_auth() -> None:
 
 def renderizar_barra_lateral() -> None:
     """Mostra autenticação ou informação da conta consoante o estado da sessão."""
+    # Auth/account area in the sidebar
     if not utilizador_autenticado():
         renderizar_auth()
         return
@@ -334,6 +335,23 @@ def renderizar_barra_lateral() -> None:
         if st.button("Terminar sessão", use_container_width=True):
             terminar_sessao()
             st.rerun()
+
+
+def selecionar_pagina() -> str:
+    """Mostra um selector na barra lateral e devolve a página escolhida."""
+    with st.sidebar:
+        st.header("Navegação")
+        escolha = st.radio(
+            "Ir para",
+            [
+                "Página Inicial",
+                "Calendário",
+                "Previsões Especiais",
+                "Ranking - Classificação Geral",
+            ],
+            index=0,
+        )
+    return escolha
 
 
 def renderizar_jogo_somente_leitura(jogo: dict[str, Any]) -> None:
@@ -472,19 +490,51 @@ def exibir_jogos() -> None:
 
 
 init_auth_state()
+pagina = selecionar_pagina()
 renderizar_barra_lateral()
 
 st.title("⚽ Mundial 2026")
-st.markdown(
-    '<p class="subtitle">Consulta os jogos e submete os teus palpites.</p>',
-    unsafe_allow_html=True,
-)
 
-if not utilizador_autenticado():
-    st.info("Inicia sessão na barra lateral para editar e guardar palpites.")
+if pagina == "Página Inicial":
+    st.markdown(
+        '<p class="subtitle">Bem-vindo à app de palpites — explora o Mundial 2026.</p>',
+        unsafe_allow_html=True,
+    )
 
-renderizar_previsoes_macro()
-st.divider()
-renderizar_ranking()
-st.divider()
-exibir_jogos()
+    # Preview top 3 do ranking
+    try:
+        ranking = get_ranking()
+    except Exception as exc:
+        st.error(f"Não foi possível carregar o ranking: {exc}")
+        ranking = []
+
+    if ranking:
+        top3 = ranking[:3]
+        df_top3 = pd.DataFrame([{"Posição": i + 1, "Nome": r.get("nome"), "Pontos": r.get("pontos_totais", 0)} for i, r in enumerate(top3)])
+        st.subheader("Top 3")
+        st.table(df_top3)
+    else:
+        st.info("Ainda não existem dados de ranking para apresentar.")
+
+elif pagina == "Calendário":
+    st.markdown(
+        '<p class="subtitle">Consulta o calendário e submete os teus palpites.</p>',
+        unsafe_allow_html=True,
+    )
+    if not utilizador_autenticado():
+        st.info("Inicia sessão na barra lateral para editar e guardar palpites.")
+    exibir_jogos()
+
+elif pagina == "Previsões Especiais":
+    st.markdown(
+        '<p class="subtitle">Vê e guarda o teu vencedor do Mundial e melhor marcador.</p>',
+        unsafe_allow_html=True,
+    )
+    renderizar_previsoes_macro()
+
+elif pagina == "Ranking - Classificação Geral":
+    st.markdown(
+        '<p class="subtitle">Classificação geral dos participantes.</p>',
+        unsafe_allow_html=True,
+    )
+    renderizar_ranking()
