@@ -15,7 +15,10 @@ CREATE TABLE jogos (
     equipa_fora TEXT,
     golos_casa_real INT DEFAULT NULL,
     golos_fora_real INT DEFAULT NULL,
-    fase TEXT
+    fase TEXT,
+    data DATE,
+    grupo TEXT,
+    cidade TEXT
 );
 
 -- Tabela de palpites dos utilizadores
@@ -29,7 +32,7 @@ CREATE TABLE palpites (
 );
 
 -- Dados de exemplo (opcional)
-INSERT INTO jogos (equipa_casa, equipa_fora, fase) VALUES
-    ('Portugal', 'Brasil', 'Grupos'),
-    ('Espanha', 'França', 'Grupos'),
-    ('Alemanha', 'Argentina', 'Grupos');
+INSERT INTO jogos (equipa_casa, equipa_fora, fase, data, grupo, cidade) VALUES
+    ('Portugal', 'Brasil', 'Grupos', '2026-06-15', 'H', 'Los Angeles'),
+    ('Espanha', 'França', 'Grupos', '2026-06-16', 'A', 'Nova Iorque'),
+    ('Alemanha', 'Argentina', 'Grupos', '2026-06-17', 'B', 'Dallas');
