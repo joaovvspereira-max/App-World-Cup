@@ -57,26 +57,60 @@ st.markdown(
         .jogo-meta {
             color: #5C6B7A;
             font-size: 0.875rem;
-            margin-bottom: 0.25rem;
+            margin-bottom: 0.5rem;
+        }
+        .jogo-card {
+            background: #ffffff;
+            padding: 0.6rem 0.75rem;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(16,24,40,0.04);
+            margin-bottom: 1rem;
         }
         .jogo-linha {
-            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            margin: 0.75rem 0 0.5rem 0;
         }
         .jogo-equipa {
             font-weight: 600;
-            text-align: center;
-            padding-top: 0.35rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
         .jogo-separador {
             text-align: center;
             font-weight: 700;
-            padding-top: 0.35rem;
             color: #5C6B7A;
+        }
+        img.flag-icon { border-radius: 4px; vertical-align: middle; }
+
+        /* Estilo global para inputs numéricos de golos */
+        input[type="number"] {
+            font-size: 1.25rem !important;
+            font-weight: 700 !important;
+            text-align: center !important;
+            border-radius: 8px !important;
+            padding: 6px 10px !important;
+            box-shadow: 0 1px 2px rgba(16,24,40,0.04) inset !important;
+            border: 1px solid #E6E9EE !important;
+            width: 64px !important;
         }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+# Mapeamento de países para códigos de bandeira (flagcdn usa códigos ISO 2-letters)
+FLAG_MAP = {
+    "Portugal": "pt",
+    "Brasil": "br",
+    "Espanha": "es",
+    "França": "fr",
+    "Alemanha": "de",
+    "Argentina": "ar",
+}
 
 
 def init_auth_state() -> None:
@@ -387,22 +421,26 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
             jogo_id = jogo["id"]
             palpite = palpites_existentes.get(jogo_id, {})
 
-            # Card container
-            with st.container():
+            # visual wrapper (card)
+            st.markdown(f'<div class="jogo-card">', unsafe_allow_html=True)
+            st.markdown(f'<p class="jogo-meta">{formatar_info_jogo(jogo)}</p>', unsafe_allow_html=True)
+
+            col_casa, col_golos_casa, col_sep, col_golos_fora, col_fora = st.columns(
+                [3, 1, 0.4, 1, 3]
+            )
+
+            with col_casa:
+                equipe_casa = jogo.get("equipa_casa", "—")
+                codigo_casa = FLAG_MAP.get(equipe_casa, "")
+                img_casa = (
+                    f'<img class="flag-icon" src="https://flagcdn.com/16x12/{codigo_casa}.png" width="24" height="18"/>'
+                    if codigo_casa
+                    else ""
+                )
                 st.markdown(
-                    f'<p class="jogo-meta">{formatar_info_jogo(jogo)}</p>',
+                    f'<p class="jogo-equipa">{img_casa} {equipe_casa}</p>',
                     unsafe_allow_html=True,
                 )
-
-                col_casa, col_golos_casa, col_sep, col_golos_fora, col_fora = st.columns(
-                    [3, 1, 0.4, 1, 3]
-                )
-
-                with col_casa:
-                    st.markdown(
-                        f'<p class="jogo-equipa">{jogo.get("equipa_casa", "—")}</p>',
-                        unsafe_allow_html=True,
-                    )
                 with col_golos_casa:
                     golos_casa = st.number_input(
                         "Golos casa",
@@ -424,8 +462,15 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                         label_visibility="collapsed",
                     )
                 with col_fora:
+                    equipe_fora = jogo.get("equipa_fora", "—")
+                    codigo_fora = FLAG_MAP.get(equipe_fora, "")
+                    img_fora = (
+                        f'<img class="flag-icon" src="https://flagcdn.com/16x12/{codigo_fora}.png" width="24" height="18"/>'
+                        if codigo_fora
+                        else ""
+                    )
                     st.markdown(
-                        f'<p class="jogo-equipa">{jogo.get("equipa_fora", "—")}</p>',
+                        f'<p class="jogo-equipa">{equipe_fora} {img_fora}</p>',
                         unsafe_allow_html=True,
                     )
 
@@ -436,6 +481,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     "golos_fora": st.session_state.get(f"golos_fora_{jogo_id}", int(palpite.get("golos_fora") or 0)),
                 }
             )
+            st.markdown('</div>', unsafe_allow_html=True)
             st.divider()
 
         guardar = st.form_submit_button("Guardar Palpites", use_container_width=True)

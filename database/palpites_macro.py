@@ -17,6 +17,7 @@ PAISES_ELITE = [
     "Alemanha",
     "Espanha",
     "Inglaterra",
+    "Croácia",
     "Uruguai",
     "EUA",
     "México",
@@ -38,7 +39,9 @@ JOGADORES_ELITE = [
     "Rodrygo",
     "Pedri",
     "Jamal Musiala",
-    "Antoine Griezmann",
+    "Neymar",
+    "Raphinha",
+    "Bruno Fernandes",
     OPCAO_OUTRO,
 ]
 
