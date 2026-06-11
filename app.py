@@ -897,9 +897,13 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                                 "golos_casa": int(st.session_state.get(f"golos_casa_{jid}", 0)),
                                 "golos_fora": int(st.session_state.get(f"golos_fora_{jid}", 0)),
                             })
-                        guardar_palpites_em_lote(st.session_state.user_id, payloads)
-                        st.success(f"{len(payloads)} prediction(s) saved successfully.")
-                        st.rerun()
+                        results = guardar_palpites_em_lote(st.session_state.user_id, payloads)
+                        # Only show success when the DB returned inserted/updated rows
+                        if results:
+                            st.success(f"{len(results)} prediction(s) saved successfully.")
+                            st.rerun()
+                        else:
+                            st.info("No changes were made to your predictions.")
                     except Exception as exc:
                         st.error(f"Error saving predictions: {exc}")
 
