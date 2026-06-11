@@ -484,29 +484,29 @@ def renderizar_previsoes_macro() -> None:
 
     with st.form("form_palpites_macro"):
         vencedor_selecionado = st.selectbox(
-            "Vencedor do Mundial",
+            "World Cup Winner",
             PAISES_ELITE,
             index=idx_vencedor,
         )
         vencedor_outro = ""
         if vencedor_selecionado == OPCAO_OUTRO:
             vencedor_outro = st.text_input(
-                "Indica o país",
+                "Specify the country",
                 value=outro_vencedor,
-                placeholder="Escreve o nome do país",
+                placeholder="Type the country name",
             )
 
         marcador_selecionado = st.selectbox(
-            "Melhor Marcador",
+            "Top Scorer",
             JOGADORES_ELITE,
             index=idx_marcador,
         )
         marcador_outro = ""
         if marcador_selecionado == OPCAO_OUTRO:
             marcador_outro = st.text_input(
-                "Indica o jogador",
+                "Specify the player",
                 value=outro_marcador,
-                placeholder="Escreve o nome do jogador",
+                placeholder="Type the player name",
             )
 
         guardar_macro = st.form_submit_button(
@@ -515,14 +515,14 @@ def renderizar_previsoes_macro() -> None:
         )
 
     if palpite_macro and palpite_macro.get("atualizado_em"):
-        st.caption(f"Última atualização: {palpite_macro['atualizado_em']}")
+        st.caption(f"Last updated: {palpite_macro['atualizado_em']}")
 
     if guardar_macro:
         vencedor = resolver_valor_previsao(vencedor_selecionado, vencedor_outro)
         marcador = resolver_valor_previsao(marcador_selecionado, marcador_outro)
 
         if not vencedor or not marcador:
-            st.error("Preenche o vencedor do mundial e o melhor marcador.")
+            st.error("Please provide both the World Cup winner and the top scorer.")
             return
 
         try:
