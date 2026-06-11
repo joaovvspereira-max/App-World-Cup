@@ -879,40 +879,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     guardar_j = st.form_submit_button("💾 SAVE PREDICTIONS", key=f"save_{jlabel}", use_container_width=True)
                     st.markdown('</div>', unsafe_allow_html=True)
 
-                    # Small script to style the rendered Save button (handles Streamlit dynamic classes)
-                    st.markdown(
-                        """
-                        <script>
-                        (function(){
-                          function s(){
-                            document.querySelectorAll('button').forEach(function(b){
-                              try{
-                                var txt = (b.innerText||b.value||'').toUpperCase();
-                                if(txt.indexOf('SAVE PREDICTIONS')!==-1){
-                                  b.style.background = '#0b63d6';
-                                  b.style.color = '#ffffff';
-                                  b.style.fontWeight = '900';
-                                  b.style.fontSize = '20px';
-                                  b.style.height = '64px';
-                                  b.style.borderRadius = '12px';
-                                  b.style.width = '100%';
-                                  b.style.textTransform = 'uppercase';
-                                  b.style.letterSpacing = '0.6px';
-                                  b.style.border = 'none';
-                                  var p = b.closest('.stButton') || b.parentElement;
-                                  if(p){ p.style.background='transparent'; p.style.padding='0'; p.style.boxShadow='none'; }
-                                }
-                              }catch(e){}
-                            });
-                          }
-                          s();
-                          setTimeout(s,200);
-                          new MutationObserver(s).observe(document.body,{childList:true,subtree:true});
-                        })();
-                        </script>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                                        # Rely on CSS overrides for button styling (no injected JS)
 
                     if guardar_j:
                         try:
