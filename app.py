@@ -1147,37 +1147,10 @@ def exibir_jogos() -> None:
         return
 
     # Ordenar jogos por data e hora
-    def _ordenar_por_data_hora(jogo: dict) -> tuple:
-        """Retorna tupla para ordenação por data e hora."""
-        data = jogo.get("data", "")
-        hora = jogo.get("hora_jogo", "")
-        
-        # Tenta converter data para formato ordenável
-        try:
-            # Assumindo formato "DD Mon YYYY" ou similar
-            from datetime import datetime
-            if data:
-                # Adapte o formato conforme necessário
-                data_obj = datetime.strptime(str(data), "%d %b %Y")
-                data_timestamp = data_obj.timestamp()
-            else:
-                data_timestamp = float('inf')
-        except Exception:
-            data_timestamp = float('inf')
-        
-        # Tenta converter hora para formato ordenável
-        try:
-            if hora:
-                hora_obj = datetime.strptime(str(hora), "%H:%M")
-                hora_timestamp = hora_obj.timestamp()
-            else:
-                hora_timestamp = 0
-        except Exception:
-            hora_timestamp = 0
-        
-        return (data_timestamp, hora_timestamp)
-    
-    jogos = sorted(jogos, key=_ordenar_por_data_hora)
+    jogos = sorted(jogos, key=lambda j: (
+        j.get("data") or datetime.date.max,
+        j.get("hora_jogo") or datetime.time.max,
+    ))
 
     if utilizador_autenticado():
         renderizar_formulario_palpites(jogos)
