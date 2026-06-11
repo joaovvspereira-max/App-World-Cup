@@ -219,6 +219,18 @@ def build_flag_map_from_db() -> dict:
     return flag_map
     
 
+def init_auth_state() -> None:
+    """Inicializa chaves de autenticação em `st.session_state` se não existirem.
+
+    Evita NameError ao aceder a `st.session_state['user_id']` antes de existir.
+    """
+    if "user_id" not in st.session_state:
+        st.session_state.user_id = None
+    if "user_name" not in st.session_state:
+        st.session_state.user_name = None
+    if "user_email" not in st.session_state:
+        st.session_state.user_email = None
+
 
 def utilizador_autenticado() -> bool:
     """Indica se existe um utilizador com sessão ativa."""
