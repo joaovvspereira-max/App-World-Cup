@@ -36,7 +36,7 @@ def registar_utilizador(email: str, password: str, nome: str) -> dict[str, Any]:
     except Exception as exc:
         raise AuthError(f"Conta criada, mas falhou ao guardar o perfil: {exc}") from exc
 
-    return {"user_id": user_id, "user_name": nome}
+    return {"user_id": user_id, "user_name": nome, "user_email": email}
 
 
 def login_utilizador(email: str, password: str) -> dict[str, Any]:
@@ -55,7 +55,7 @@ def login_utilizador(email: str, password: str) -> dict[str, Any]:
     user_id = str(response.user.id)
     user_name = _obter_nome_utilizador(client, user_id, response.user.user_metadata, email)
 
-    return {"user_id": user_id, "user_name": user_name}
+    return {"user_id": user_id, "user_name": user_name, "user_email": email}
 
 
 def _obter_nome_utilizador(client, user_id: str, metadata: dict | None, email: str) -> str:

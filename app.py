@@ -8,6 +8,7 @@ import streamlit as st
 
 from database.auth import AuthError, login_utilizador, registar_utilizador
 from database.jogos import get_jogos
+from database.supabase_client import get_supabase_client
 from database.palpites import (
     get_palpites_utilizador,
     guardar_palpites_em_lote,
@@ -119,6 +120,8 @@ def init_auth_state() -> None:
         st.session_state.user_id = None
     if "user_name" not in st.session_state:
         st.session_state.user_name = None
+    if "user_email" not in st.session_state:
+        st.session_state.user_email = None
 
 
 def utilizador_autenticado() -> bool:
@@ -130,6 +133,7 @@ def terminar_sessao() -> None:
     """Remove os dados de autenticação da sessão."""
     st.session_state.user_id = None
     st.session_state.user_name = None
+    st.session_state.user_email = None
 
 
 def formatar_data_jogo(valor: Any) -> str | None:
@@ -329,6 +333,7 @@ def renderizar_auth() -> None:
                     dados = login_utilizador(email, password)
                     st.session_state.user_id = dados["user_id"]
                     st.session_state.user_name = dados["user_name"]
+                    st.session_state.user_email = dados.get("user_email")
                     st.success(f"Bem-vindo, {dados['user_name']}!")
                     st.rerun()
                 except AuthError as exc:
@@ -348,6 +353,7 @@ def renderizar_auth() -> None:
                     dados = registar_utilizador(email, password, nome)
                     st.session_state.user_id = dados["user_id"]
                     st.session_state.user_name = dados["user_name"]
+                    st.session_state.user_email = dados.get("user_email")
                     st.success("Conta criada com sucesso!")
                     st.rerun()
                 except AuthError as exc:
@@ -375,17 +381,87 @@ def selecionar_pagina() -> str:
     """Mostra um selector na barra lateral e devolve a página escolhida."""
     with st.sidebar:
         st.header("Navegação")
-        escolha = st.radio(
-            "Ir para",
-            [
-                "Página Inicial",
-                "Calendário",
-                "Previsões Especiais",
-                "Ranking - Classificação Geral",
-            ],
-            index=0,
-        )
+        opcoes = [
+            "Página Inicial",
+            "Calendário",
+            "Previsões Especiais",
+            "Ranking - Classificação Geral",
+        ]
+        # Mostrar Admin apenas para o email definido em secrets
+        admin_email = st.secrets.get("ADMIN_EMAIL") if isinstance(st.secrets, dict) or hasattr(st, 'secrets') else None
+        if st.session_state.get("user_email") and admin_email and st.session_state.get("user_email") == admin_email:
+            opcoes.append("Admin")
+
+        escolha = st.radio("Ir para", opcoes, index=0)
     return escolha
+
+
+def renderizar_admin() -> None:
+    """Área administrativa — apenas acessível ao email definido em `st.secrets['ADMIN_EMAIL']`."""
+    st.subheader("Área Administrativa")
+
+    if not utilizador_autenticado():
+        st.warning("Inicia sessão com a conta de administrador para aceder a esta área.")
+        return
+
+    admin_email = st.secrets.get("ADMIN_EMAIL")
+    if not admin_email or st.session_state.get("user_email") != admin_email:
+        st.warning("Não estás autorizado a aceder a esta página.")
+        return
+
+    client = get_supabase_client()
+
+    st.markdown("**Inserir / Atualizar resultado de jogo**")
+    try:
+        jogos = get_jogos()
+    except Exception as exc:
+        st.error(f"Erro ao carregar jogos: {exc}")
+        return
+
+    if jogos:
+        escolhas = [f"{j['id']} — {j.get('equipa_casa','?')} vs {j.get('equipa_fora','?')} ({formatar_info_jogo(j)})" for j in jogos]
+        idx = st.selectbox("Escolhe o jogo", range(len(escolhas)), format_func=lambda i: escolhas[i])
+        jogo = jogos[idx]
+
+        with st.form("form_resultado"):
+            golos_casa = st.number_input("Golos casa (real)", min_value=0, value=int(jogo.get("golos_casa_real") or 0), key="admin_golos_casa")
+            golos_fora = st.number_input("Golos fora (real)", min_value=0, value=int(jogo.get("golos_fora_real") or 0), key="admin_golos_fora")
+            guardar_res = st.form_submit_button("Guardar Resultado")
+
+        if guardar_res:
+            try:
+                client.table("jogos").update({"golos_casa_real": int(golos_casa), "golos_fora_real": int(golos_fora)}).eq("id", jogo["id"]).execute()
+                st.success("Resultado guardado com sucesso.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Erro ao guardar resultado: {exc}")
+
+    st.markdown("---")
+    st.markdown("**Criar novo jogo (fase de grupos)**")
+    with st.form("form_criar_jogo"):
+        equipa_casa = st.text_input("Equipa Casa")
+        equipa_fora = st.text_input("Equipa Fora")
+        data_jogo = st.date_input("Data")
+        fase = st.text_input("Fase", value="Grupos")
+        grupo = st.text_input("Grupo")
+        cidade = st.text_input("Cidade")
+        criar = st.form_submit_button("Criar Jogo")
+
+    if criar:
+        try:
+            payload = {
+                "equipa_casa": equipa_casa.strip(),
+                "equipa_fora": equipa_fora.strip(),
+                "data": data_jogo.isoformat(),
+                "fase": fase.strip(),
+                "grupo": grupo.strip(),
+                "cidade": cidade.strip(),
+            }
+            client.table("jogos").insert(payload).execute()
+            st.success("Jogo criado com sucesso.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Erro ao criar jogo: {exc}")
 
 
 def renderizar_jogo_somente_leitura(jogo: dict[str, Any]) -> None:
@@ -584,3 +660,6 @@ elif pagina == "Ranking - Classificação Geral":
         unsafe_allow_html=True,
     )
     renderizar_ranking()
+
+elif pagina == "Admin":
+    renderizar_admin()
