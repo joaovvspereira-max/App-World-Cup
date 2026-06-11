@@ -23,6 +23,32 @@ from database.palpites import (
     get_ranking,
     calcular_pontos_jogo,
 )
+import os
+from pathlib import Path
+
+
+def _read_local_secrets() -> dict:
+    """Try to read .streamlit/secrets.toml directly as a fallback when `st.secrets` is empty.
+
+    Uses tomllib (Python 3.11+) or the third-party `toml` package if available.
+    Returns a dict with parsed values or an empty dict on failure.
+    """
+    secrets_path = Path.cwd() / ".streamlit" / "secrets.toml"
+    if not secrets_path.exists():
+        return {}
+    try:
+        import tomllib as _toml
+    except Exception:
+        try:
+            import toml as _toml
+        except Exception:
+            return {}
+    try:
+        with secrets_path.open("rb") as f:
+            data = _toml.load(f)
+        return data or {}
+    except Exception:
+        return {}
 from database.palpites_macro import (
     JOGADORES_ELITE,
     OPCAO_OUTRO,
@@ -611,23 +637,7 @@ def renderizar_barra_lateral() -> None:
         st.markdown(f"Hello, **{st.session_state.user_name}**")
         if st.session_state.get("user_email"):
             st.caption(f"{st.session_state.get('user_email')}")
-        # Debug helper: allow forcing Admin visibility for testing
-        with st.expander("Debug / Admin helpers", expanded=False):
-            st.write("Session state:")
-            try:
-                st.json({k: (str(v) if not isinstance(v, (str, int, float, list, dict)) else v) for k, v in dict(st.session_state).items()})
-            except Exception:
-                st.write(dict(st.session_state))
-            st.write("Secrets (ADMIN_EMAIL / ADMIN_USER_ID):")
-            try:
-                admin_email = st.secrets.get("ADMIN_EMAIL") if isinstance(st.secrets, dict) or hasattr(st, 'secrets') else None
-                admin_uid = st.secrets.get("ADMIN_USER_ID") if isinstance(st.secrets, dict) or hasattr(st, 'secrets') else None
-                st.write({"ADMIN_EMAIL": admin_email, "ADMIN_USER_ID": admin_uid})
-            except Exception:
-                st.write("(could not read secrets)")
-            if st.button("Force show Admin page for this session"):
-                st.session_state.force_admin = True
-                st.experimental_rerun()
+        
         if st.button("Sign Out", use_container_width=True):
             terminar_sessao()
             st.rerun()
@@ -673,6 +683,11 @@ def selecionar_pagina() -> str:
         admin_secret = None
         if isinstance(st.secrets, dict) or hasattr(st, "secrets"):
             admin_secret = st.secrets.get("ADMIN_EMAIL")
+        # fallback: try reading local .streamlit/secrets.toml directly
+        if not admin_secret:
+            local = _read_local_secrets()
+            if local and isinstance(local, dict):
+                admin_secret = local.get("ADMIN_EMAIL")
 
         admin_emails = []
         if admin_secret:
@@ -682,10 +697,8 @@ def selecionar_pagina() -> str:
                 admin_emails = list(admin_secret)
 
         # Primary check: match by email
-        # Allow forcing admin in-session for troubleshooting
-        if st.session_state.get("force_admin"):
-            opcoes.append("Admin")
-        elif st.session_state.get("user_email") and admin_emails and st.session_state.get("user_email") in admin_emails:
+        # Primary check: match by email
+        if st.session_state.get("user_email") and admin_emails and st.session_state.get("user_email") in admin_emails:
             opcoes.append("Admin")
         else:
             # Fallback: allow specifying admin by user_id in secrets for robust detection
@@ -693,6 +706,10 @@ def selecionar_pagina() -> str:
             if admin_secret:
                 # allow a separate ADMIN_USER_ID value in secrets (string or CSV)
                 admin_uid_secret = st.secrets.get("ADMIN_USER_ID") if isinstance(st.secrets, dict) or hasattr(st, 'secrets') else None
+            if not admin_uid_secret:
+                local = _read_local_secrets()
+                if local and isinstance(local, dict):
+                    admin_uid_secret = local.get("ADMIN_USER_ID")
             admin_uids = []
             if admin_uid_secret:
                 if isinstance(admin_uid_secret, str):
@@ -715,15 +732,32 @@ def renderizar_admin() -> None:
         return
 
     admin_secret = st.secrets.get("ADMIN_EMAIL") if isinstance(st.secrets, dict) or hasattr(st, "secrets") else None
+    # fallback to local secrets file if Streamlit runtime didn't load secrets
+    if not admin_secret:
+        local = _read_local_secrets()
+        if local and isinstance(local, dict):
+            admin_secret = local.get("ADMIN_EMAIL")
+    # environment variable fallback (useful for deployed environments)
+    if not admin_secret:
+        admin_secret = os.environ.get("ADMIN_EMAIL")
+
     admin_emails = []
     if admin_secret:
         if isinstance(admin_secret, str):
             admin_emails = [e.strip() for e in admin_secret.split(",") if e.strip()]
         elif isinstance(admin_secret, (list, tuple)):
             admin_emails = list(admin_secret)
+
     # Also support ADMIN_USER_ID secret as fallback
     admin_uids = []
     admin_uid_secret = st.secrets.get("ADMIN_USER_ID") if isinstance(st.secrets, dict) or hasattr(st, 'secrets') else None
+    if not admin_uid_secret:
+        local = _read_local_secrets()
+        if local and isinstance(local, dict):
+            admin_uid_secret = local.get("ADMIN_USER_ID")
+    # environment variable fallback
+    if not admin_uid_secret:
+        admin_uid_secret = os.environ.get("ADMIN_USER_ID")
     if admin_uid_secret:
         if isinstance(admin_uid_secret, str):
             admin_uids = [u.strip() for u in admin_uid_secret.split(",") if u.strip()]
@@ -788,32 +822,7 @@ def renderizar_admin() -> None:
                 st.success(f"Result saved and updated {updated} prediction(s) with points.")
                 st.rerun()
 
-    st.markdown("---")
-    st.markdown("**Create new match (group stage)**")
-    with st.form("form_criar_jogo"):
-        equipa_casa = st.text_input("Home Team")
-        equipa_fora = st.text_input("Away Team")
-        data_jogo = st.date_input("Date")
-        fase = st.text_input("Stage", value="Groups")
-        grupo = st.text_input("Group")
-        cidade = st.text_input("City")
-        criar = st.form_submit_button("Create Match")
-
-    if criar:
-        try:
-            payload = {
-                "equipa_casa": equipa_casa.strip(),
-                "equipa_fora": equipa_fora.strip(),
-                "data": data_jogo.isoformat(),
-                "fase": fase.strip(),
-                "grupo": grupo.strip(),
-                "cidade": cidade.strip(),
-            }
-            client.table("jogos").insert(payload).execute()
-            st.success("Match created successfully.")
-            st.rerun()
-        except Exception as exc:
-            st.error(f"Error creating match: {exc}")
+    # (Create new match removed: admin page now only updates existing match results)
 
 
 def renderizar_jogo_somente_leitura(jogo: dict[str, Any]) -> None:
