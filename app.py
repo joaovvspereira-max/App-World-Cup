@@ -903,7 +903,17 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                             st.success(f"{len(results)} prediction(s) saved successfully.")
                             st.rerun()
                         else:
-                            st.info("No changes were made to your predictions.")
+                            # Provide diagnostics to help debug why nothing was saved
+                            st.warning(
+                                "No changes were made to your predictions. Possible causes: not signed in, DB RLS/policies blocking writes, or predictions identical to existing values."
+                            )
+                            uid = st.session_state.get("user_id") if isinstance(st.session_state, dict) else getattr(st.session_state, "user_id", None)
+                            st.markdown(f"**Debug:** user id = {uid} | payloads = {len(payloads)}")
+                            # show a short preview of the payloads
+                            try:
+                                st.json(payloads[:10])
+                            except Exception:
+                                st.write(payloads[:10])
                     except Exception as exc:
                         st.error(f"Error saving predictions: {exc}")
 

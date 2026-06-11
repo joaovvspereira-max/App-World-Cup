@@ -183,67 +183,47 @@ def guardar_palpites_em_lote(
     """Faz upsert em lote na tabela 'palpites'."""
     if not palpites:
         return []
-
     client = get_supabase_client()
-    payloads = [
-        {
-            "utilizador_id": utilizador_id,
-            "jogo_id": palpite["jogo_id"],
-            "golos_casa_palpite": palpite["golos_casa"],
-            "golos_fora_palpite": palpite["golos_fora"],
-        }
-        for palpite in palpites
-    ]
-    # Safer upsert: don't rely on DB having a unique constraint for (utilizador_id, jogo_id).
-    # Instead, fetch existing rows for this user and update them individually; insert the rest.
-    jogo_ids = [p["jogo_id"] for p in palpites]
-    existing_resp = (
-        client.table("palpites")
-        .select("id, jogo_id")
-        .eq("utilizador_id", utilizador_id)
-        .in_("jogo_id", jogo_ids)
-        .execute()
-    )
-    existing = {row["jogo_id"]: row for row in (existing_resp.data or [])}
-
-    to_update = []
-    to_insert = []
-    for p in payloads:
-        jid = p["jogo_id"]
-        if jid in existing:
-            # update existing row
-            to_update.append((existing[jid]["id"], p))
-        else:
-            to_insert.append(p)
 
     results: list[dict[str, Any]] = []
-    # perform updates
-    for row_id, p in to_update:
+    # iterate each prediction and attempt an update first, then insert if no row was updated
+    for palpite in palpites:
+        jid = palpite.get("jogo_id")
+        if jid is None:
+            continue
+        payload = {
+            "utilizador_id": utilizador_id,
+            "jogo_id": jid,
+            "golos_casa_palpite": palpite.get("golos_casa", 0),
+            "golos_fora_palpite": palpite.get("golos_fora", 0),
+        }
+
         try:
-            resp = client.table("palpites").update({
-                "golos_casa_palpite": p["golos_casa_palpite"],
-                "golos_fora_palpite": p["golos_fora_palpite"],
-            }).eq("id", row_id).execute()
-            if resp.data:
-                results.extend(resp.data)
+            # try update by user + jogo
+            upd = (
+                client.table("palpites")
+                .update({
+                    "golos_casa_palpite": payload["golos_casa_palpite"],
+                    "golos_fora_palpite": payload["golos_fora_palpite"],
+                })
+                .eq("utilizador_id", utilizador_id)
+                .eq("jogo_id", jid)
+                .execute()
+            )
+            if upd and getattr(upd, "data", None):
+                results.extend(upd.data)
+                continue
         except Exception:
-            # best-effort: skip failures and continue
+            # continue to insert attempt if update fails for any reason
             pass
 
-    # perform bulk insert for new rows
-    if to_insert:
+        # insert new row
         try:
-            resp = client.table("palpites").insert(to_insert).execute()
-            if resp.data:
-                results.extend(resp.data)
+            ins = client.table("palpites").insert(payload).execute()
+            if ins and getattr(ins, "data", None):
+                results.extend(ins.data)
         except Exception:
-            # fallback: if bulk insert fails, attempt single inserts
-            for p in to_insert:
-                try:
-                    r = client.table("palpites").insert(p).execute()
-                    if r.data:
-                        results.extend(r.data)
-                except Exception:
-                    pass
+            # if insert fails, skip and continue to next
+            pass
 
     return results
