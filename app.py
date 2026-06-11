@@ -127,7 +127,26 @@ st.markdown(
         form[aria-label="form_palpites"] hr, form[aria-label="form_palpites"] .stDivider { margin: 0.125rem 0 !important; padding: 0 !important; }
         hr { margin: 0.125rem 0 !important; }
         /* Style any submit button inside the form reliably */
-        form[aria-label="form_palpites"] .stButton>button, form[aria-label="form_palpites"] button[type="submit"] { background-color:#0b63d6 !important; color:white !important; font-weight:900 !important; font-size:22px !important; height:64px !important; border-radius:12px !important; width:100% !important; text-transform:uppercase !important; letter-spacing:0.6px !important; }
+        form[aria-label="form_palpites"] .stButton>button,
+        form[aria-label="form_palpites"] button[type="submit"],
+        form[aria-label="form_palpites"] input[type="submit"],
+        form[aria-label="form_palpites"] .save-card .stButton>button,
+        .save-card button,
+        .save-card input[type="submit"] {
+            background-color:#0b63d6 !important;
+            background-image: none !important;
+            color: #ffffff !important;
+            font-weight: 900 !important;
+            font-size: 24px !important;
+            height: 64px !important;
+            padding: 0 1rem !important;
+            border: none !important;
+            box-shadow: none !important;
+            border-radius: 12px !important;
+            width: 100% !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.6px !important;
+        }
     </style>
     """,
     unsafe_allow_html=True,
