@@ -111,14 +111,14 @@ st.markdown(
             width: 64px !important;
         }
         .team-name { font-size: 1.25rem; font-weight:800; }
-        .jogo-card { text-align: center; padding: 0.24rem 0.75rem; margin-top:0.125rem; }
+        .jogo-card { text-align: center; padding: 0.24rem 0.75rem; margin-top:0.125rem; border-bottom: 1px solid #E6E9EE; }
         .jogo-equipa { justify-content: center; }
         .result-space { height: 4px; }
         input[type="number"] { width: 56px !important; height:40px !important; }
         .sticky-header { position: sticky; top: 0; z-index: 1100; background: white; padding: 0.5rem 0; }
         .sticky-submit { display: none; }
         .save-card { width:100%; display:block; margin-top:0.5rem; }
-        .save-card .stButton>button { background-color:#0b63d6 !important; color:white !important; font-weight:900 !important; font-size:20px !important; height:56px !important; border-radius:12px !important; width:100% !important; }
+        .save-card .stButton>button { background-color:#0b63d6 !important; color:white !important; font-weight:900 !important; font-size:22px !important; height:64px !important; border-radius:12px !important; width:100% !important; text-transform:uppercase !important; letter-spacing:0.6px !important; }
 
         /* Hide default empty form header/panel that sometimes renders above the first card */
         form[aria-label="form_palpites"] { background: transparent !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; border-radius: 0 !important; }
@@ -127,7 +127,7 @@ st.markdown(
         form[aria-label="form_palpites"] hr, form[aria-label="form_palpites"] .stDivider { margin: 0.125rem 0 !important; padding: 0 !important; }
         hr { margin: 0.125rem 0 !important; }
         /* Style any submit button inside the form reliably */
-        form[aria-label="form_palpites"] .stButton>button, form[aria-label="form_palpites"] button[type="submit"] { background-color:#0b63d6 !important; color:white !important; font-weight:900 !important; font-size:20px !important; height:64px !important; border-radius:12px !important; width:100% !important; }
+        form[aria-label="form_palpites"] .stButton>button, form[aria-label="form_palpites"] button[type="submit"] { background-color:#0b63d6 !important; color:white !important; font-weight:900 !important; font-size:22px !important; height:64px !important; border-radius:12px !important; width:100% !important; text-transform:uppercase !important; letter-spacing:0.6px !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -158,13 +158,13 @@ DEFAULT_FLAG_MAP = {
     "Congo DR": "cd",
     "Egypt": "eg",
     "Ecuador": "ec",
-    "Scotland": "gb",
+    "Scotland": "gb-sco",
     "Spain": "es",
     "United States": "us",
     "France": "fr",
     "Ghana": "gh",
     "Haiti": "ht",
-    "England": "gb",
+    "England": "gb-ing",
     "Iran": "ir",
     "Iraq": "iq",
     "Italy": "it",
@@ -839,7 +839,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     # compact separator handled by CSS; avoid Streamlit's default divider
                 # Save button for this jornada (submits the parent form)
                 st.markdown('<div class="save-card">', unsafe_allow_html=True)
-                guardar_j = st.form_submit_button(f"💾 Save Predictions", key=f"save_{jlabel}", use_container_width=True)
+                guardar_j = st.form_submit_button(f"💾 SAVE PREDICTIONS", key=f"save_{jlabel}", use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
                 if guardar_j:
                     # when clicked, same behavior as earlier single guardar
