@@ -611,6 +611,23 @@ def renderizar_barra_lateral() -> None:
         st.markdown(f"Hello, **{st.session_state.user_name}**")
         if st.session_state.get("user_email"):
             st.caption(f"{st.session_state.get('user_email')}")
+        # Debug helper: allow forcing Admin visibility for testing
+        with st.expander("Debug / Admin helpers", expanded=False):
+            st.write("Session state:")
+            try:
+                st.json({k: (str(v) if not isinstance(v, (str, int, float, list, dict)) else v) for k, v in dict(st.session_state).items()})
+            except Exception:
+                st.write(dict(st.session_state))
+            st.write("Secrets (ADMIN_EMAIL / ADMIN_USER_ID):")
+            try:
+                admin_email = st.secrets.get("ADMIN_EMAIL") if isinstance(st.secrets, dict) or hasattr(st, 'secrets') else None
+                admin_uid = st.secrets.get("ADMIN_USER_ID") if isinstance(st.secrets, dict) or hasattr(st, 'secrets') else None
+                st.write({"ADMIN_EMAIL": admin_email, "ADMIN_USER_ID": admin_uid})
+            except Exception:
+                st.write("(could not read secrets)")
+            if st.button("Force show Admin page for this session"):
+                st.session_state.force_admin = True
+                st.experimental_rerun()
         if st.button("Sign Out", use_container_width=True):
             terminar_sessao()
             st.rerun()
@@ -665,7 +682,10 @@ def selecionar_pagina() -> str:
                 admin_emails = list(admin_secret)
 
         # Primary check: match by email
-        if st.session_state.get("user_email") and admin_emails and st.session_state.get("user_email") in admin_emails:
+        # Allow forcing admin in-session for troubleshooting
+        if st.session_state.get("force_admin"):
+            opcoes.append("Admin")
+        elif st.session_state.get("user_email") and admin_emails and st.session_state.get("user_email") in admin_emails:
             opcoes.append("Admin")
         else:
             # Fallback: allow specifying admin by user_id in secrets for robust detection
