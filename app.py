@@ -21,6 +21,7 @@ from database.palpites import (
     guardar_palpites_em_lote,
     submeter_palpite,
     get_ranking,
+    calcular_pontos_jogo,
 )
 from database.palpites_macro import (
     JOGADORES_ELITE,
@@ -665,11 +666,34 @@ def renderizar_admin() -> None:
 
         if guardar_res:
             try:
+                # update official result for the match
                 client.table("jogos").update({"golos_casa_real": int(golos_casa), "golos_fora_real": int(golos_fora)}).eq("id", jogo["id"]).execute()
-                st.success("Result saved successfully.")
-                st.rerun()
             except Exception as exc:
                 st.error(f"Error saving result: {exc}")
+            else:
+                # After saving the official result, update all user predictions for this match with calculated points
+                try:
+                    palpites_resp = client.table("palpites").select("id, utilizador_id, golos_casa_palpite, golos_fora_palpite").eq("jogo_id", jogo["id"]).execute()
+                    palpites_list = palpites_resp.data or []
+                except Exception as exc:
+                    st.warning(f"Result saved but failed to load predictions for scoring: {exc}")
+                    st.rerun()
+
+                updated = 0
+                for p in palpites_list:
+                    try:
+                        p_casa = int(p.get("golos_casa_palpite") or 0)
+                        p_fora = int(p.get("golos_fora_palpite") or 0)
+                        pontos = calcular_pontos_jogo(p_casa, p_fora, int(golos_casa), int(golos_fora))
+                        resp = client.table("palpites").update({"pontos": pontos}).eq("id", p["id"]).execute()
+                        if resp and getattr(resp, "data", None):
+                            updated += 1
+                    except Exception:
+                        # skip failures per-row
+                        pass
+
+                st.success(f"Result saved and updated {updated} prediction(s) with points.")
+                st.rerun()
 
     st.markdown("---")
     st.markdown("**Create new match (group stage)**")
@@ -878,6 +902,28 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                             "golos_fora": st.session_state.get(f"golos_fora_{jogo_id}", int(palpite.get("golos_fora") or 0)),
                         }
                     )
+                    # If the match already has a real result, show it and the points for this user's palpite
+                    if jogo.get("golos_casa_real") is not None and jogo.get("golos_fora_real") is not None:
+                        try:
+                            r_casa = int(jogo.get("golos_casa_real"))
+                            r_fora = int(jogo.get("golos_fora_real"))
+                        except Exception:
+                            r_casa = jogo.get("golos_casa_real")
+                            r_fora = jogo.get("golos_fora_real")
+
+                        pontos_palpite = palpite.get("pontos")
+                        if pontos_palpite is None:
+                            try:
+                                pontos_palpite = calcular_pontos_jogo(
+                                    int(palpite.get("golos_casa") or 0),
+                                    int(palpite.get("golos_fora") or 0),
+                                    int(r_casa),
+                                    int(r_fora),
+                                )
+                            except Exception:
+                                pontos_palpite = 0
+
+                        st.markdown(f"Resultado real: {r_casa}-{r_fora}<br>+{pontos_palpite} pontos", unsafe_allow_html=True)
                     # small reserved space for result display
                     st.markdown('<div class="result-space"></div>', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)

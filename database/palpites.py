@@ -163,7 +163,7 @@ def get_palpites_utilizador(utilizador_id: str) -> dict[int, dict[str, int]]:
     client = get_supabase_client()
     response = (
         client.table("palpites")
-        .select("jogo_id, golos_casa_palpite, golos_fora_palpite")
+        .select("jogo_id, golos_casa_palpite, golos_fora_palpite, pontos")
         .eq("utilizador_id", utilizador_id)
         .execute()
     )
@@ -171,6 +171,7 @@ def get_palpites_utilizador(utilizador_id: str) -> dict[int, dict[str, int]]:
         row["jogo_id"]: {
             "golos_casa": row["golos_casa_palpite"],
             "golos_fora": row["golos_fora_palpite"],
+            "pontos": row.get("pontos"),
         }
         for row in (response.data or [])
     }
