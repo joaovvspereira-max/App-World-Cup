@@ -624,9 +624,19 @@ def selecionar_pagina() -> str:
             "Special Predictions",
             "Ranking - Overall Standings",
         ]
-        # Mostrar Admin apenas para o email definido em secrets
-        admin_email = st.secrets.get("ADMIN_EMAIL") if isinstance(st.secrets, dict) or hasattr(st, 'secrets') else None
-        if st.session_state.get("user_email") and admin_email and st.session_state.get("user_email") == admin_email:
+        # Mostrar Admin apenas para o(s) email(s) definido(s) em secrets
+        admin_secret = None
+        if isinstance(st.secrets, dict) or hasattr(st, "secrets"):
+            admin_secret = st.secrets.get("ADMIN_EMAIL")
+
+        admin_emails = []
+        if admin_secret:
+            if isinstance(admin_secret, str):
+                admin_emails = [e.strip() for e in admin_secret.split(",") if e.strip()]
+            elif isinstance(admin_secret, (list, tuple)):
+                admin_emails = list(admin_secret)
+
+        if st.session_state.get("user_email") and admin_emails and st.session_state.get("user_email") in admin_emails:
             opcoes.append("Admin")
 
         escolha = st.radio("Go to", opcoes, index=0)
@@ -641,8 +651,15 @@ def renderizar_admin() -> None:
         st.warning("Sign in with the administrator account to access this area.")
         return
 
-    admin_email = st.secrets.get("ADMIN_EMAIL")
-    if not admin_email or st.session_state.get("user_email") != admin_email:
+    admin_secret = st.secrets.get("ADMIN_EMAIL") if isinstance(st.secrets, dict) or hasattr(st, "secrets") else None
+    admin_emails = []
+    if admin_secret:
+        if isinstance(admin_secret, str):
+            admin_emails = [e.strip() for e in admin_secret.split(",") if e.strip()]
+        elif isinstance(admin_secret, (list, tuple)):
+            admin_emails = list(admin_secret)
+
+    if not admin_emails or st.session_state.get("user_email") not in admin_emails:
         st.warning("You are not authorized to access this page.")
         return
 
