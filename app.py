@@ -13,6 +13,7 @@ import urllib.request
 import urllib.parse
 import json
 import time
+import unicodedata
 from database.palpites import (
     get_palpites_utilizador,
     guardar_palpites_em_lote,
@@ -121,23 +122,28 @@ DEFAULT_FLAG_MAP = {
     "Alemanha": "de",
     "Argentina": "ar",
 }
-
-
 ALIASES = {
     "EUA": "United States",
     "Países Baixos": "Netherlands",
     "Inglaterra": "United Kingdom",
     "Coreia do Sul": "Korea, Republic of",
     "Irão": "Iran",
-    "México": "Mexico",
 }
 
 
-def build_flag_map_from_db() -> dict:
-    """Constrói um mapeamento country name -> iso2 (lowercase) a partir da tabela `jogos`.
+def _normalize(text: str) -> str:
+    if not text:
+        return ""
+    text = str(text)
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text.lower().strip()
 
-    Usa `restcountries.com` para obter o código `cca2` quando possível, e recorre a
-    `DEFAULT_FLAG_MAP` e `ALIASES` como fallback.
+
+def build_flag_map_from_db() -> dict:
+    """Constrói mapeamento country name -> iso2 (lowercase) a partir da tabela `jogos`.
+
+    Faz fetch de toda a lista de países (`restcountries`) e normaliza nomes para match robusto.
     """
     # cache in session to avoid repeated external requests
     if st.session_state.get("_flag_map_cache"):
@@ -158,42 +164,60 @@ def build_flag_map_from_db() -> dict:
         if r.get("equipa_fora"):
             nomes.add(r.get("equipa_fora"))
 
+    # Build a lookup of country names -> cca2 by fetching all countries once
+    name_lookup: dict[str, str] = {}
+    try:
+        with urllib.request.urlopen("https://restcountries.com/v3.1/all", timeout=10) as u:
+            all_c = json.load(u)
+            for c in all_c:
+                cca2 = c.get("cca2")
+                if not cca2:
+                    continue
+                # common and official names
+                names_to_index = []
+                name_obj = c.get("name") or {}
+                common = name_obj.get("common")
+                official = name_obj.get("official")
+                if common:
+                    names_to_index.append(common)
+                if official:
+                    names_to_index.append(official)
+                # altSpellings
+                for alt in c.get("altSpellings", []) or []:
+                    names_to_index.append(alt)
+                # translations
+                for t in (c.get("translations") or {}).values():
+                    tn = t.get("common")
+                    if tn:
+                        names_to_index.append(tn)
+
+                for nm in names_to_index:
+                    key = _normalize(nm)
+                    if key:
+                        name_lookup[key] = cca2.lower()
+            # be polite
+            time.sleep(0.05)
+    except Exception:
+        # if all-countries fetch fails, we'll rely on defaults and aliases
+        name_lookup = {}
+
     for nome in nomes:
         if nome in flag_map:
             continue
-        # try aliases
-        query_name = ALIASES.get(nome, nome)
-        try:
-            q = urllib.parse.quote(query_name)
-            url = f"https://restcountries.com/v3.1/name/{q}?fullText=false"
-            with urllib.request.urlopen(url, timeout=5) as u:
-                data = json.load(u)
-                if isinstance(data, list) and data:
-                    cca2 = data[0].get("cca2")
-                    if cca2:
-                        flag_map[nome] = cca2.lower()
-                        # be polite to API
-                        time.sleep(0.05)
-                        continue
-        except Exception:
-            pass
-        # fallback: try simple lower two-letter from manual or skip
-        # do nothing if not found
+        norm = _normalize(nome)
+        code = name_lookup.get(norm)
+        if not code:
+            # try alias mapping
+            alias = ALIASES.get(nome)
+            if alias:
+                code = name_lookup.get(_normalize(alias))
+        if code:
+            flag_map[nome] = code
 
     # save cache
     st.session_state["_flag_map_cache"] = flag_map
     return flag_map
     
-
-
-def init_auth_state() -> None:
-    """Garante que o estado de autenticação existe na sessão."""
-    if "user_id" not in st.session_state:
-        st.session_state.user_id = None
-    if "user_name" not in st.session_state:
-        st.session_state.user_name = None
-    if "user_email" not in st.session_state:
-        st.session_state.user_email = None
 
 
 def utilizador_autenticado() -> bool:
