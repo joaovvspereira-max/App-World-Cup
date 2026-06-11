@@ -574,7 +574,14 @@ def renderizar_ranking() -> None:
     </style>
     """
 
-    st.markdown(css + df_html, unsafe_allow_html=True)
+    # Render the HTML table using Streamlit components to ensure the HTML is interpreted
+    try:
+        # height: base 200px plus ~40px per row
+        table_height = max(200, 40 * len(df) + 80)
+        st.components.v1.html(css + df_html, height=table_height, scrolling=True)
+    except Exception:
+        # Fallback to markdown if components aren't available in this environment
+        st.markdown(css + df_html, unsafe_allow_html=True)
 
     # Expanders com detalhe por utilizador (apenas jogos finalizados aparecem no detalhe)
     for usuario in ranking:
