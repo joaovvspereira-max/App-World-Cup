@@ -9,6 +9,10 @@ import streamlit as st
 from database.auth import AuthError, login_utilizador, registar_utilizador
 from database.jogos import get_jogos
 from database.supabase_client import get_supabase_client
+import urllib.request
+import urllib.parse
+import json
+import time
 from database.palpites import (
     get_palpites_utilizador,
     guardar_palpites_em_lote,
@@ -98,13 +102,18 @@ st.markdown(
             border: 1px solid #E6E9EE !important;
             width: 64px !important;
         }
+        .team-name { font-size: 1.25rem; font-weight:700; }
+        .jogo-card { text-align: center; }
+        .jogo-equipa { justify-content: center; }
+        .sticky-header { position: sticky; top: 0; z-index: 1100; background: white; padding: 0.5rem 0; }
+        .sticky-submit { position: sticky; top: 64px; z-index: 1050; background: white; padding: 0.5rem 0; display:flex; justify-content:center; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # Mapeamento de países para códigos de bandeira (flagcdn usa códigos ISO 2-letters)
-FLAG_MAP = {
+DEFAULT_FLAG_MAP = {
     "Portugal": "pt",
     "Brasil": "br",
     "Espanha": "es",
@@ -112,6 +121,69 @@ FLAG_MAP = {
     "Alemanha": "de",
     "Argentina": "ar",
 }
+
+
+ALIASES = {
+    "EUA": "United States",
+    "Países Baixos": "Netherlands",
+    "Inglaterra": "United Kingdom",
+    "Coreia do Sul": "Korea, Republic of",
+    "Irão": "Iran",
+    "México": "Mexico",
+}
+
+
+def build_flag_map_from_db() -> dict:
+    """Constrói um mapeamento country name -> iso2 (lowercase) a partir da tabela `jogos`.
+
+    Usa `restcountries.com` para obter o código `cca2` quando possível, e recorre a
+    `DEFAULT_FLAG_MAP` e `ALIASES` como fallback.
+    """
+    # cache in session to avoid repeated external requests
+    if st.session_state.get("_flag_map_cache"):
+        return st.session_state["_flag_map_cache"]
+
+    flag_map = DEFAULT_FLAG_MAP.copy()
+    try:
+        client = get_supabase_client()
+        resp = client.table("jogos").select("equipa_casa, equipa_fora").execute()
+        rows = resp.data or []
+    except Exception:
+        return flag_map
+
+    nomes = set()
+    for r in rows:
+        if r.get("equipa_casa"):
+            nomes.add(r.get("equipa_casa"))
+        if r.get("equipa_fora"):
+            nomes.add(r.get("equipa_fora"))
+
+    for nome in nomes:
+        if nome in flag_map:
+            continue
+        # try aliases
+        query_name = ALIASES.get(nome, nome)
+        try:
+            q = urllib.parse.quote(query_name)
+            url = f"https://restcountries.com/v3.1/name/{q}?fullText=false"
+            with urllib.request.urlopen(url, timeout=5) as u:
+                data = json.load(u)
+                if isinstance(data, list) and data:
+                    cca2 = data[0].get("cca2")
+                    if cca2:
+                        flag_map[nome] = cca2.lower()
+                        # be polite to API
+                        time.sleep(0.05)
+                        continue
+        except Exception:
+            pass
+        # fallback: try simple lower two-letter from manual or skip
+        # do nothing if not found
+
+    # save cache
+    st.session_state["_flag_map_cache"] = flag_map
+    return flag_map
+    
 
 
 def init_auth_state() -> None:
@@ -490,9 +562,16 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
     except Exception as exc:
         st.error(f"Não foi possível carregar os teus palpites: {exc}")
         return
+    # build dynamic flag map from DB
+    flag_map = build_flag_map_from_db()
 
     palpites_submetidos: list[dict[str, int]] = []
     with st.form("form_palpites"):
+        # sticky save button at top
+        st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
+        guardar = st.form_submit_button("Guardar Palpites", use_container_width=False)
+        st.markdown('</div>', unsafe_allow_html=True)
+
         for jogo in jogos:
             jogo_id = jogo["id"]
             palpite = palpites_existentes.get(jogo_id, {})
@@ -501,23 +580,24 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
             st.markdown(f'<div class="jogo-card">', unsafe_allow_html=True)
             st.markdown(f'<p class="jogo-meta">{formatar_info_jogo(jogo)}</p>', unsafe_allow_html=True)
 
-            col_casa, col_golos_casa, col_sep, col_golos_fora, col_fora = st.columns(
-                [3, 1, 0.4, 1, 3]
-            )
+            col_left, col_mid, col_sep, col_mid2, col_right = st.columns([2.5, 1, 0.4, 1, 2.5])
 
-            with col_casa:
+            with col_left:
+                # home team name + input adjacent
+                name_col, input_col = st.columns([3, 1])
                 equipe_casa = jogo.get("equipa_casa", "—")
-                codigo_casa = FLAG_MAP.get(equipe_casa, "")
+                codigo_casa = flag_map.get(equipe_casa, "")
                 img_casa = (
-                    f'<img class="flag-icon" src="https://flagcdn.com/16x12/{codigo_casa}.png" width="24" height="18"/>'
+                    f'<img class="flag-icon" src="https://flagcdn.com/48x36/{codigo_casa}.png" width="48" height="36"/>'
                     if codigo_casa
                     else ""
                 )
-                st.markdown(
-                    f'<p class="jogo-equipa">{img_casa} {equipe_casa}</p>',
-                    unsafe_allow_html=True,
-                )
-                with col_golos_casa:
+                with name_col:
+                    st.markdown(
+                        f'<p class="jogo-equipa">{img_casa} <span class="team-name">{equipe_casa}</span></p>',
+                        unsafe_allow_html=True,
+                    )
+                with input_col:
                     golos_casa = st.number_input(
                         "Golos casa",
                         min_value=0,
@@ -526,9 +606,21 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                         key=f"golos_casa_{jogo_id}",
                         label_visibility="collapsed",
                     )
-                with col_sep:
-                    st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
-                with col_golos_fora:
+
+            with col_sep:
+                st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
+
+            with col_right:
+                # away input + name adjacent (input first so name appears next to it)
+                input_col2, name_col2 = st.columns([1, 3])
+                equipe_fora = jogo.get("equipa_fora", "—")
+                codigo_fora = flag_map.get(equipe_fora, "")
+                img_fora = (
+                    f'<img class="flag-icon" src="https://flagcdn.com/48x36/{codigo_fora}.png" width="48" height="36"/>'
+                    if codigo_fora
+                    else ""
+                )
+                with input_col2:
                     golos_fora = st.number_input(
                         "Golos fora",
                         min_value=0,
@@ -537,16 +629,9 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                         key=f"golos_fora_{jogo_id}",
                         label_visibility="collapsed",
                     )
-                with col_fora:
-                    equipe_fora = jogo.get("equipa_fora", "—")
-                    codigo_fora = FLAG_MAP.get(equipe_fora, "")
-                    img_fora = (
-                        f'<img class="flag-icon" src="https://flagcdn.com/16x12/{codigo_fora}.png" width="24" height="18"/>'
-                        if codigo_fora
-                        else ""
-                    )
+                with name_col2:
                     st.markdown(
-                        f'<p class="jogo-equipa">{equipe_fora} {img_fora}</p>',
+                        f'<p class="jogo-equipa"><span class="team-name">{equipe_fora}</span> {img_fora}</p>',
                         unsafe_allow_html=True,
                     )
 
@@ -559,8 +644,6 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
             )
             st.markdown('</div>', unsafe_allow_html=True)
             st.divider()
-
-        guardar = st.form_submit_button("Guardar Palpites", use_container_width=True)
 
     if guardar:
         try:
@@ -615,7 +698,7 @@ init_auth_state()
 pagina = selecionar_pagina()
 renderizar_barra_lateral()
 
-st.title("⚽ Mundial 2026")
+st.markdown('<div class="sticky-header"><h1>⚽ Mundial 2026</h1></div>', unsafe_allow_html=True)
 
 if pagina == "Página Inicial":
     st.markdown(
