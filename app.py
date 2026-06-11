@@ -64,15 +64,16 @@ st.markdown(
         .jogo-meta {
             color: #5C6B7A;
             font-size: 0.95rem;
-            margin-bottom: 0.25rem;
+            margin-top: 0.04rem;
+            margin-bottom: 0.08rem;
             font-weight: 600;
         }
         .jogo-card {
-            background: #ffffff;
+            background: transparent;
             padding: 0.18rem 0.75rem;
-            border-radius: 10px;
-            box-shadow: 0 1px 3px rgba(16,24,40,0.04);
-            margin: 0.02rem 0 0.25rem 0;
+            border-radius: 0;
+            box-shadow: none;
+            margin: 0 0 0.12rem 0;
         }
         .jogo-linha {
             display: flex;
@@ -110,9 +111,9 @@ st.markdown(
             width: 64px !important;
         }
         .team-name { font-size: 1.25rem; font-weight:800; }
-        .jogo-card { text-align: center; padding: 0.9rem 1rem; }
+        .jogo-card { text-align: center; padding: 0.24rem 0.75rem; margin-top:0.125rem; }
         .jogo-equipa { justify-content: center; }
-        .result-space { height: 8px; }
+        .result-space { height: 4px; }
         input[type="number"] { width: 56px !important; height:40px !important; }
         .sticky-header { position: sticky; top: 0; z-index: 1100; background: white; padding: 0.5rem 0; }
         .sticky-submit { display: none; }
@@ -122,6 +123,11 @@ st.markdown(
         /* Hide default empty form header/panel that sometimes renders above the first card */
         form[aria-label="form_palpites"] { background: transparent !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; border-radius: 0 !important; }
         form[aria-label="form_palpites"] > div:first-child { display: none !important; }
+        /* Reduce divider (hr) spacing and any Streamlit divider wrappers inside the form */
+        form[aria-label="form_palpites"] hr, form[aria-label="form_palpites"] .stDivider { margin: 0.125rem 0 !important; padding: 0 !important; }
+        hr { margin: 0.125rem 0 !important; }
+        /* Style any submit button inside the form reliably */
+        form[aria-label="form_palpites"] .stButton>button, form[aria-label="form_palpites"] button[type="submit"] { background-color:#0b63d6 !important; color:white !important; font-weight:900 !important; font-size:20px !important; height:64px !important; border-radius:12px !important; width:100% !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -689,7 +695,7 @@ def renderizar_jogo_somente_leitura(jogo: dict[str, Any]) -> None:
     with col_fora:
         st.markdown(f'<p class="jogo-equipa">{jogo.get("equipa_fora", "—")}</p>', unsafe_allow_html=True)
 
-    st.divider()
+    # compact separator handled by CSS; avoid Streamlit's default divider
 
 
 def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
@@ -830,7 +836,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     # small reserved space for result display
                     st.markdown('<div class="result-space"></div>', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
-                    st.divider()
+                    # compact separator handled by CSS; avoid Streamlit's default divider
                 # Save button for this jornada (submits the parent form)
                 st.markdown('<div class="save-card">', unsafe_allow_html=True)
                 guardar_j = st.form_submit_button(f"💾 Save Predictions", key=f"save_{jlabel}", use_container_width=True)
