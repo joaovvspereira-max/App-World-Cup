@@ -64,7 +64,7 @@ st.markdown(
         .jogo-meta {
             color: #5C6B7A;
             font-size: 0.95rem;
-            margin-bottom: 0.75rem;
+            margin-bottom: 0.25rem;
             font-weight: 600;
         }
         .jogo-card {
@@ -92,10 +92,10 @@ st.markdown(
             font-weight: 700;
             color: #5C6B7A;
         }
-        img.flag-icon { border-radius: 12px; vertical-align: middle; border: 1px solid #E6E9EE; background: white; padding: 2px; object-fit: cover; }
-        .flag-wrapper { display:flex; align-items:center; width:96px; }
-        .flag-left { justify-content:flex-start; }
-        .flag-right { justify-content:flex-end; }
+        img.flag-icon { border-radius: 12px; vertical-align: middle; border: 1px solid #E6E9EE; background: white; padding: 2px; object-fit: cover; max-width:100%; height:auto; }
+        .flag-wrapper { display:flex; align-items:center; width:80px; box-sizing:border-box; overflow:hidden; }
+        .flag-left { justify-content:flex-start; padding-left:6px; }
+        .flag-right { justify-content:flex-end; padding-right:6px; }
         .team-block { display:flex; align-items:center; gap:0.75rem; justify-content:center; min-height:48px; }
 
         /* Estilo global para inputs numéricos de golos */
@@ -112,8 +112,8 @@ st.markdown(
         .team-name { font-size: 1.25rem; font-weight:800; }
         .jogo-card { text-align: center; padding: 0.9rem 1rem; }
         .jogo-equipa { justify-content: center; }
-        .result-space { height: 64px; }
-        input[type="number"] { width: 60px !important; height:44px !important; }
+        .result-space { height: 16px; }
+        input[type="number"] { width: 56px !important; height:40px !important; }
         .sticky-header { position: sticky; top: 0; z-index: 1100; background: white; padding: 0.5rem 0; }
         .sticky-submit { position: sticky; top: 64px; z-index: 1050; background: white; padding: 0.5rem 0; display:flex; justify-content:center; }
     </style>
@@ -766,7 +766,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
             codigo_casa = flag_map.get(equipe_casa, "")
             with col_flag_left:
                 img_casa = (
-                    f'<div class="flag-wrapper flag-left"><img class="flag-icon" src="https://flagcdn.com/96x64/{codigo_casa}.png" width="96" height="64"/></div>'
+                    f'<div class="flag-wrapper flag-left"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_casa}.png" width="64" height="48"/></div>'
                     if codigo_casa
                     else '<div class="flag-wrapper flag-left"></div>'
                 )
@@ -790,10 +790,6 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
             with col_sep:
                 st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
 
-            # center separator (dash)
-            with col_sep:
-                st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
-
             # right name + input (input near center, name left-aligned)
             equipe_fora = jogo.get("equipa_fora", "—")
             codigo_fora = flag_map.get(equipe_fora, "")
@@ -814,7 +810,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
             # right flag
             with col_flag_right:
                 img_fora = (
-                    f'<div class="flag-wrapper flag-right"><img class="flag-icon" src="https://flagcdn.com/96x64/{codigo_fora}.png" width="96" height="64"/></div>'
+                    f'<div class="flag-wrapper flag-right"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_fora}.png" width="64" height="48"/></div>'
                     if codigo_fora
                     else '<div class="flag-wrapper flag-right"></div>'
                 )
