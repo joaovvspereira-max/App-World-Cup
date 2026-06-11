@@ -876,6 +876,41 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                         st.rerun()
                     except Exception as exc:
                         st.error(f"Error saving predictions: {exc}")
+                                # Inject JS to force-style the rendered button (handles Streamlit's dynamic classnames)
+                        st.markdown(
+                                """
+                                <script>
+                                (function(){
+                                    const applyStyle = () => {
+                                        document.querySelectorAll('button').forEach(b=>{
+                                            try{
+                                                const txt = (b.textContent||'').toUpperCase();
+                                                if(txt.includes('SAVE PREDICTIONS')){
+                                                    b.style.backgroundColor = '#0b63d6';
+                                                    b.style.color = '#ffffff';
+                                                    b.style.fontWeight = '900';
+                                                    b.style.fontSize = '22px';
+                                                    b.style.height = '64px';
+                                                    b.style.borderRadius = '12px';
+                                                    b.style.width = '100%';
+                                                    b.style.textTransform = 'uppercase';
+                                                    b.style.letterSpacing = '0.6px';
+                                                    b.style.border = 'none';
+                                                }
+                                            }catch(e){}
+                                        });
+                                    };
+                                    // run immediately and again after a short delay to handle dynamic renders
+                                    applyStyle();
+                                    setTimeout(applyStyle, 300);
+                                    // also observe DOM changes
+                                    const obs = new MutationObserver(applyStyle);
+                                    obs.observe(document.body, {childList:true, subtree:true});
+                                })();
+                                </script>
+                                """,
+                                unsafe_allow_html=True,
+                        )
 
 
 def exibir_jogos() -> None:
