@@ -63,10 +63,10 @@ st.markdown(
         }
         .jogo-meta {
             color: #5C6B7A;
-            font-size: 1.05rem;
+            font-size: 0.95rem;
             margin-top: 0.04rem;
             margin-bottom: 0.08rem;
-            font-weight: 700;
+            font-weight: 600;
         }
         .jogo-card {
             background: transparent;
@@ -388,26 +388,8 @@ def formatar_info_jogo(jogo: dict[str, Any]) -> str:
     partes: list[str] = []
 
     data = formatar_data_jogo(jogo.get("data"))
-    hora = jogo.get("hora_jogo") or jogo.get("time") or jogo.get("hora")
-    hora_str = None
-    if hora:
-        try:
-            # allow time-only or datetime strings
-            hh = str(hora)
-            # if contains T or date, try parse
-            if "T" in hh or "+" in hh or "-" in hh:
-                dt = datetime.fromisoformat(hh.replace("Z", "+00:00"))
-                hora_str = dt.strftime("%H:%M")
-            else:
-                hora_str = hh
-        except Exception:
-            hora_str = str(hora)
-
     if data:
-        if hora_str:
-            partes.append(f"{data} {hora_str}")
-        else:
-            partes.append(data)
+        partes.append(data)
 
     if jogo.get("fase"):
         partes.append(str(jogo["fase"]))
@@ -879,23 +861,24 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     guardar_j = st.form_submit_button("💾 SAVE PREDICTIONS", key=f"save_{jlabel}", use_container_width=True)
                     st.markdown('</div>', unsafe_allow_html=True)
 
-                                        # Rely on CSS overrides for button styling (no injected JS)
-
                     if guardar_j:
-                        try:
-                            payloads = []
-                            for p in palpites_submetidos:
-                                jid = p["jogo_id"]
-                                payloads.append({
-                                    "jogo_id": jid,
-                                    "golos_casa": int(st.session_state.get(f"golos_casa_{jid}", 0)),
-                                    "golos_fora": int(st.session_state.get(f"golos_fora_{jid}", 0)),
-                                })
-                            guardar_palpites_em_lote(st.session_state.user_id, payloads)
-                            st.success(f"{len(payloads)} prediction(s) saved successfully.")
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(f"Error saving predictions: {exc}")
+                                                # when clicked, same behavior as earlier single guardar
+                                                try:
+                                                        payloads = []
+                                                        for p in palpites_submetidos:
+                                                                jid = p["jogo_id"]
+                                                                payloads.append({
+                                                                        "jogo_id": jid,
+                                                                        "golos_casa": int(st.session_state.get(f"golos_casa_{jid}", 0)),
+                                                                        "golos_fora": int(st.session_state.get(f"golos_fora_{jid}", 0)),
+                                                                })
+                                                        guardar_palpites_em_lote(st.session_state.user_id, payloads)
+                                                        st.success(f"{len(payloads)} prediction(s) saved successfully.")
+                                                        st.rerun()
+                                                except Exception as exc:
+                                                        st.error(f"Error saving predictions: {exc}")
+
+                                        # Custom JS removed; relying on CSS overrides for button styling
 
 
 def exibir_jogos() -> None:
