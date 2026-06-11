@@ -13,6 +13,7 @@ import urllib.request
 import urllib.parse
 import json
 import time
+import re
 import unicodedata
 import difflib
 from database.palpites import (
@@ -740,32 +741,53 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
 
         # order jornadas with sensible tournament order: numeric matchdays first, then knockout rounds with final last
         def _j_key(k: str):
+            """Return a sortable key for jornada labels.
+
+            Ordering desired:
+            - Matchday 1, Matchday 2, Matchday 3, ... (numeric matchdays ascending)
+            - Round of 32
+            - Round of 16
+            - Quarter-finals
+            - Semi-finals
+            - Third place play-off
+            - Final
+            """
             s = str(k).strip()
+            sl = s.lower()
             if s == "":
-                return (0, 0, "")
-            # numeric matchdays: keep numeric order
-            try:
-                return (1, int(s), "")
-            except Exception:
-                sl = s.lower()
-                # priority categories (higher second value = later in tournament)
-                if "final" in sl:
-                    return (4, 0, sl)
-                if "semif" in sl or "meia" in sl:
-                    return (3, 0, sl)
-                if "third" in sl or "3rd" in sl or "third place" in sl or "play-off" in sl or "playoff" in sl:
-                    return (3, 5, sl)
-                if "quart" in sl or "quarter" in sl:
-                    return (2, 0, sl)
-                if "round of 16" in sl or "oitav" in sl or "round16" in sl:
-                    return (2, 1, sl)
-                if "round of 32" in sl or "32" in sl:
-                    # place round of 32 after group matchdays
-                    return (1, 1000, sl)
-                if "group" in sl or "grupo" in sl or "matchday" in sl or "jornada" in sl:
-                    return (1, 0, sl)
-                # fallback: keep in middle
-                return (2, 50, sl)
+                return (9999, 0, "")
+
+            # numeric matchday detection: digit plus 'matchday' or 'jornada' or plain number
+            m = re.search(r"(\d+)", s)
+            if m and ("matchday" in sl or "jornada" in sl or sl.isdigit()):
+                return (0, int(m.group(1)), sl)
+
+            # explicit keyword mapping to ensure the desired tournament order
+            order_keywords = [
+                ("round of 32", 1),
+                ("round 32", 1),
+                ("round of 16", 2),
+                ("round 16", 2),
+                ("quarter", 3),
+                ("quart", 3),
+                ("semi", 4),
+                ("semif", 4),
+                ("third", 5),
+                ("third place", 5),
+                ("play-off", 5),
+                ("playoff", 5),
+                ("final", 6),
+            ]
+            for kw, rank in order_keywords:
+                if kw in sl:
+                    return (100 + rank, 0, sl)
+
+            # groups / generic matchdays without a number should appear before knockouts
+            if "group" in sl or "grupo" in sl or "matchday" in sl or "jornada" in sl:
+                return (0, 999, sl)
+
+            # Fallback: place after known items but before unknown final ones
+            return (1000, 0, sl)
 
         jornadas = sorted(jogos_por_jornada.keys(), key=_j_key)
 
