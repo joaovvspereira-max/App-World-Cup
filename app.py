@@ -117,7 +117,11 @@ st.markdown(
         .sticky-header { position: sticky; top: 0; z-index: 1100; background: white; padding: 0.5rem 0; }
         .sticky-submit { display: none; }
         .save-card { width:100%; display:block; margin-top:0.5rem; }
-        .save-card .stButton>button { background-color:#0b63d6; color:white; font-weight:800; font-size:18px; height:56px; border-radius:12px; width:100%; }
+        .save-card .stButton>button { background-color:#0b63d6 !important; color:white !important; font-weight:900 !important; font-size:20px !important; height:56px !important; border-radius:12px !important; width:100% !important; }
+
+        /* Hide default empty form header/panel that sometimes renders above the first card */
+        form[aria-label="form_palpites"] { background: transparent !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; border-radius: 0 !important; }
+        form[aria-label="form_palpites"] > div:first-child { display: none !important; }
     </style>
     """,
     unsafe_allow_html=True,
