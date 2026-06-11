@@ -556,8 +556,24 @@ def renderizar_ranking() -> None:
         [{"Name": r.get("nome"), "Points": r.get("pontos_totais", 0)} for r in ranking]
     )
     df = df.sort_values(by="Points", ascending=False).reset_index(drop=True)
+    # Position column starting at 1
+    df.insert(0, "Position", range(1, len(df) + 1))
 
-    st.dataframe(df, use_container_width=True)
+    # Make a visually pleasant styled table: center, highlight top 3
+    def _highlight_top(row):
+        # row.name is 0-based index after reset
+        if row.name < 3:
+            return ["background-color: #fff8e1; font-weight: bold; text-align: center;" for _ in row]
+        return ["text-align: center;" for _ in row]
+
+    styled = (
+        df.style
+        .apply(_highlight_top, axis=1)
+        .set_properties(**{"text-align": "center"})
+        .format({"Points": "{:.0f}"})
+    )
+
+    st.dataframe(styled, use_container_width=True)
 
     # Expanders com detalhe por utilizador (apenas jogos finalizados aparecem no detalhe)
     for usuario in ranking:
