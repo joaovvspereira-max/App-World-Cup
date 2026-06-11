@@ -559,24 +559,22 @@ def renderizar_ranking() -> None:
     # Position column starting at 1
     df.insert(0, "Position", range(1, len(df) + 1))
 
-    # Make a visually pleasant styled table: center, highlight top 3
-    def _highlight_top(row):
-        if row.name < 3:
-            return ["background-color: #fff8e1; font-weight: bold;" for _ in row]
-        return ["" for _ in row]
+    # Render an HTML table so we can hide the DataFrame index reliably across pandas versions
+    df_html = df.to_html(index=False, classes="ranking-table", border=0, justify="left", escape=False)
 
-    styled = (
-        df.style
-        .apply(_highlight_top, axis=1)
-        .hide_index()
-        .set_properties(**{"text-align": "center", "font-size": "14px", "padding": "6px"})
-        .set_properties(subset=["Position", "Points"], **{"width": "70px", "max-width": "70px"})
-        .set_properties(subset=["Name"], **{"text-align": "left"})
-        .format({"Points": "{:.0f}"})
-    )
+    css = """
+    <style>
+    .ranking-table { width: 100%; border-collapse: collapse; font-size: 15px; }
+    .ranking-table th { text-align: left; padding: 6px 10px; color: #6B7280; font-weight: 600; background: #fbfbfb; }
+    .ranking-table td { padding: 6px 10px; border-top: 1px solid #eee; vertical-align: middle; }
+    .ranking-table td:nth-child(1), .ranking-table th:nth-child(1) { width: 70px; max-width:70px; text-align: center; }
+    .ranking-table td:nth-child(3), .ranking-table th:nth-child(3) { width: 70px; max-width:70px; text-align: center; }
+    .ranking-table td:nth-child(2) { text-align: left; }
+    .ranking-table tbody tr:nth-child(-n+3) { background-color: #fff8e1; font-weight: 700; }
+    </style>
+    """
 
-    # Show dataframe with more height so it's not clipped; rows are thinner due to smaller padding
-    st.dataframe(styled, use_container_width=True, height=420)
+    st.markdown(css + df_html, unsafe_allow_html=True)
 
     # Expanders com detalhe por utilizador (apenas jogos finalizados aparecem no detalhe)
     for usuario in ranking:
