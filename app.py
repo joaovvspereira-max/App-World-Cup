@@ -158,12 +158,12 @@ DEFAULT_FLAG_MAP = {
     "Congo DR": "cd",
     "Egypt": "eg",
     "Ecuador": "ec",
-    "Scotland": "gb-sct",
     "Spain": "es",
     "United States": "us",
     "France": "fr",
     "Ghana": "gh",
     "Haiti": "ht",
+    "Scotland": "gb-sct",
     "England": "gb-eng",
     "Iran": "ir",
     "Iraq": "iq",
@@ -776,7 +776,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     codigo_casa = flag_map.get(equipe_casa, "")
                     with col_flag_left:
                         img_casa = (
-                            f'<div class="flag-wrapper flag-left"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_casa}.png" width="64" height="48"/></div>'
+                            f'<div class="flag-wrapper flag-left"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_casa.lower()}.png" width="64" height="48" onerror="if(!this.dataset.t1){{this.dataset.t1=1;this.src=\'https://flagcdn.com/{codigo_casa.lower()}.svg\';}}else{{this.onerror=null;this.src=\'https://flagcdn.com/64x48/gb.png\';}}"/></div>'
                             if codigo_casa
                             else '<div class="flag-wrapper flag-left"></div>'
                         )
@@ -820,7 +820,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     # right flag
                     with col_flag_right:
                         img_fora = (
-                            f'<div class="flag-wrapper flag-right"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_fora}.png" width="64" height="48"/></div>'
+                            f'<div class="flag-wrapper flag-right"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_fora.lower()}.png" width="64" height="48" onerror="if(!this.dataset.t1){{this.dataset.t1=1;this.src=\'https://flagcdn.com/{codigo_fora.lower()}.svg\';}}else{{this.onerror=null;this.src=\'https://flagcdn.com/64x48/gb.png\';}}"/></div>'
                             if codigo_fora
                             else '<div class="flag-wrapper flag-right"></div>'
                         )
