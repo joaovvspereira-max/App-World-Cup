@@ -609,6 +609,8 @@ def renderizar_barra_lateral() -> None:
     with st.sidebar:
         st.header("Account")
         st.markdown(f"Hello, **{st.session_state.user_name}**")
+        if st.session_state.get("user_email"):
+            st.caption(f"{st.session_state.get('user_email')}")
         if st.button("Sign Out", use_container_width=True):
             terminar_sessao()
             st.rerun()
@@ -662,8 +664,23 @@ def selecionar_pagina() -> str:
             elif isinstance(admin_secret, (list, tuple)):
                 admin_emails = list(admin_secret)
 
+        # Primary check: match by email
         if st.session_state.get("user_email") and admin_emails and st.session_state.get("user_email") in admin_emails:
             opcoes.append("Admin")
+        else:
+            # Fallback: allow specifying admin by user_id in secrets for robust detection
+            admin_uid_secret = None
+            if admin_secret:
+                # allow a separate ADMIN_USER_ID value in secrets (string or CSV)
+                admin_uid_secret = st.secrets.get("ADMIN_USER_ID") if isinstance(st.secrets, dict) or hasattr(st, 'secrets') else None
+            admin_uids = []
+            if admin_uid_secret:
+                if isinstance(admin_uid_secret, str):
+                    admin_uids = [u.strip() for u in admin_uid_secret.split(",") if u.strip()]
+                elif isinstance(admin_uid_secret, (list, tuple)):
+                    admin_uids = list(admin_uid_secret)
+            if st.session_state.get("user_id") and admin_uids and str(st.session_state.get("user_id")) in admin_uids:
+                opcoes.append("Admin")
 
         escolha = st.radio("Go to", opcoes, index=0)
     return escolha
@@ -684,8 +701,21 @@ def renderizar_admin() -> None:
             admin_emails = [e.strip() for e in admin_secret.split(",") if e.strip()]
         elif isinstance(admin_secret, (list, tuple)):
             admin_emails = list(admin_secret)
+    # Also support ADMIN_USER_ID secret as fallback
+    admin_uids = []
+    admin_uid_secret = st.secrets.get("ADMIN_USER_ID") if isinstance(st.secrets, dict) or hasattr(st, 'secrets') else None
+    if admin_uid_secret:
+        if isinstance(admin_uid_secret, str):
+            admin_uids = [u.strip() for u in admin_uid_secret.split(",") if u.strip()]
+        elif isinstance(admin_uid_secret, (list, tuple)):
+            admin_uids = list(admin_uid_secret)
 
-    if not admin_emails or st.session_state.get("user_email") not in admin_emails:
+    if not admin_emails and not admin_uids:
+        st.warning("You are not authorized to access this page.")
+        return
+
+    # authorize if email matches or user_id matches
+    if not ((st.session_state.get("user_email") and st.session_state.get("user_email") in admin_emails) or (st.session_state.get("user_id") and str(st.session_state.get("user_id")) in admin_uids)):
         st.warning("You are not authorized to access this page.")
         return
 
