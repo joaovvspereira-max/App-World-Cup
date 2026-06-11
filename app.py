@@ -69,10 +69,10 @@ st.markdown(
         }
         .jogo-card {
             background: #ffffff;
-            padding: 0.6rem 0.75rem;
+            padding: 0.35rem 0.75rem;
             border-radius: 10px;
             box-shadow: 0 1px 3px rgba(16,24,40,0.04);
-            margin-bottom: 1rem;
+            margin: 0.1rem 0 0.45rem 0;
         }
         .jogo-linha {
             display: flex;
@@ -172,54 +172,6 @@ DEFAULT_FLAG_MAP = {
     "Turkey": "tr",
     "Uruguay": "uy",
     "Uzbekistan": "uz",
-
-    # Portuguese keys (as stored in DB)
-    "México": "mx",
-    "África do Sul": "za",
-    "Coreia do Sul": "kr",
-    "Chéquia": "cz",
-    "Canadá": "ca",
-    "Bósnia e Herzegovina": "ba",
-    "Estados Unidos": "us",
-    "Paraguai": "py",
-    "Haiti": "ht",
-    "Escócia": "gb",
-    "Austrália": "au",
-    "Turquia": "tr",
-    "Marrocos": "ma",
-    "Catar": "qa",
-    "Suíça": "ch",
-    "Costa do Marfim": "ci",
-    "Equador": "ec",
-    "Curaçao": "cw",
-    "Países Baixos": "nl",
-    "Japão": "jp",
-    "Suécia": "se",
-    "Tunísia": "tn",
-    "Arábia Saudita": "sa",
-    "Uruguai": "uy",
-    "Espanha": "es",
-    "Cabo Verde": "cv",
-    "Irão": "ir",
-    "Nova Zelândia": "nz",
-    "Bélgica": "be",
-    "Egito": "eg",
-    "França": "fr",
-    "Senegal": "sn",
-    "Iraque": "iq",
-    "Noruega": "no",
-    "Argentina": "ar",
-    "Argélia": "dz",
-    "Áustria": "at",
-    "Jordânia": "jo",
-    "Gana": "gh",
-    "Panamá": "pa",
-    "Inglaterra": "gb",
-    "Croácia": "hr",
-    "Portugal": "pt",
-    "República Democrática do Congo": "cd",
-    "Usbequistão": "uz",
-    "Colômbia": "co",
 }
 # Note: ALIASES removed — matching uses fuzzy/name heuristics now.
 
@@ -749,84 +701,105 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
         st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
         guardar = st.form_submit_button("Save Predictions", use_container_width=False)
         st.markdown('</div>', unsafe_allow_html=True)
+        # group matches by the 'jornada' column (matchday)
+        from collections import defaultdict
 
-        for jogo in jogos:
-            jogo_id = jogo["id"]
-            palpite = palpites_existentes.get(jogo_id, {})
+        jogos_por_jornada: dict[str, list[dict]] = defaultdict(list)
+        for j in jogos:
+            chave = j.get("jornada") or j.get("matchday") or j.get("round") or ""
+            jogos_por_jornada[str(chave)].append(j)
 
-            # visual wrapper (card)
-            st.markdown(f'<div class="jogo-card">', unsafe_allow_html=True)
-            st.markdown(f'<p class="jogo-meta">{formatar_info_jogo(jogo)}</p>', unsafe_allow_html=True)
+        # order jornadas: try numeric sort where possible, otherwise keep insertion order
+        def _j_key(k: str):
+            try:
+                return (0, int(k))
+            except Exception:
+                return (1, k)
 
-            # layout with 5 columns so flags are at the card edges and names sit between flag and central score
-            col_flag_left, col_name_left, col_sep, col_name_right, col_flag_right = st.columns([1, 3.6, 0.4, 3.6, 1])
+        jornadas = sorted(jogos_por_jornada.keys(), key=_j_key)
 
-            # left flag
-            equipe_casa = jogo.get("equipa_casa", "—")
-            codigo_casa = flag_map.get(equipe_casa, "")
-            with col_flag_left:
-                img_casa = (
-                    f'<div class="flag-wrapper flag-left"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_casa}.png" width="64" height="48"/></div>'
-                    if codigo_casa
-                    else '<div class="flag-wrapper flag-left"></div>'
-                )
-                st.markdown(img_casa, unsafe_allow_html=True)
+        # create tabs inside the single form so we keep one Save button
+        tabs = st.tabs([str(j) if str(j) else "All" for j in jornadas])
+        for idx, jlabel in enumerate(jornadas):
+            tab = tabs[idx]
+            with tab:
+                for jogo in jogos_por_jornada[jlabel]:
+                    jogo_id = jogo["id"]
+                    palpite = palpites_existentes.get(jogo_id, {})
 
-            # left name + input (name aligned right so it's near center)
-            with col_name_left:
-                name_sub, input_sub = st.columns([3, 1])
-                with name_sub:
-                    st.markdown(f'<div style="text-align:right" class="team-block"><span class="team-name">{equipe_casa}</span></div>', unsafe_allow_html=True)
-                with input_sub:
-                    golos_casa = st.number_input(
-                        "Home goals",
-                        min_value=0,
-                        step=1,
-                        value=int(palpite.get("golos_casa") or 0),
-                        key=f"golos_casa_{jogo_id}",
-                        label_visibility="collapsed",
+                    # visual wrapper (card)
+                    st.markdown(f'<div class="jogo-card">', unsafe_allow_html=True)
+                    st.markdown(f'<p class="jogo-meta">{formatar_info_jogo(jogo)}</p>', unsafe_allow_html=True)
+
+                    # layout with 5 columns so flags are at the card edges and names sit between flag and central score
+                    col_flag_left, col_name_left, col_sep, col_name_right, col_flag_right = st.columns([1, 3.6, 0.4, 3.6, 1])
+
+                    # left flag
+                    equipe_casa = jogo.get("equipa_casa", "—")
+                    codigo_casa = flag_map.get(equipe_casa, "")
+                    with col_flag_left:
+                        img_casa = (
+                            f'<div class="flag-wrapper flag-left"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_casa}.png" width="64" height="48"/></div>'
+                            if codigo_casa
+                            else '<div class="flag-wrapper flag-left"></div>'
+                        )
+                        st.markdown(img_casa, unsafe_allow_html=True)
+
+                    # left name + input (name aligned right so it's near center)
+                    with col_name_left:
+                        name_sub, input_sub = st.columns([3, 1])
+                        with name_sub:
+                            st.markdown(f'<div style="text-align:right" class="team-block"><span class="team-name">{equipe_casa}</span></div>', unsafe_allow_html=True)
+                        with input_sub:
+                            golos_casa = st.number_input(
+                                "Home goals",
+                                min_value=0,
+                                step=1,
+                                value=int(palpite.get("golos_casa") or 0),
+                                key=f"golos_casa_{jogo_id}",
+                                label_visibility="collapsed",
+                            )
+
+                    with col_sep:
+                        st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
+
+                    # right name + input (input near center, name left-aligned)
+                    equipe_fora = jogo.get("equipa_fora", "—")
+                    codigo_fora = flag_map.get(equipe_fora, "")
+                    with col_name_right:
+                        input_sub2, name_sub2 = st.columns([1, 3])
+                        with input_sub2:
+                            golos_fora = st.number_input(
+                                "Away goals",
+                                min_value=0,
+                                step=1,
+                                value=int(palpite.get("golos_fora") or 0),
+                                key=f"golos_fora_{jogo_id}",
+                                label_visibility="collapsed",
+                            )
+                        with name_sub2:
+                            st.markdown(f'<div style="text-align:left" class="team-block"><span class="team-name">{equipe_fora}</span></div>', unsafe_allow_html=True)
+
+                    # right flag
+                    with col_flag_right:
+                        img_fora = (
+                            f'<div class="flag-wrapper flag-right"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_fora}.png" width="64" height="48"/></div>'
+                            if codigo_fora
+                            else '<div class="flag-wrapper flag-right"></div>'
+                        )
+                        st.markdown(img_fora, unsafe_allow_html=True)
+
+                    palpites_submetidos.append(
+                        {
+                            "jogo_id": jogo_id,
+                            "golos_casa": st.session_state.get(f"golos_casa_{jogo_id}", int(palpite.get("golos_casa") or 0)),
+                            "golos_fora": st.session_state.get(f"golos_fora_{jogo_id}", int(palpite.get("golos_fora") or 0)),
+                        }
                     )
-
-            with col_sep:
-                st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
-
-            # right name + input (input near center, name left-aligned)
-            equipe_fora = jogo.get("equipa_fora", "—")
-            codigo_fora = flag_map.get(equipe_fora, "")
-            with col_name_right:
-                input_sub2, name_sub2 = st.columns([1, 3])
-                with input_sub2:
-                    golos_fora = st.number_input(
-                        "Away goals",
-                        min_value=0,
-                        step=1,
-                        value=int(palpite.get("golos_fora") or 0),
-                        key=f"golos_fora_{jogo_id}",
-                        label_visibility="collapsed",
-                    )
-                with name_sub2:
-                    st.markdown(f'<div style="text-align:left" class="team-block"><span class="team-name">{equipe_fora}</span></div>', unsafe_allow_html=True)
-
-            # right flag
-            with col_flag_right:
-                img_fora = (
-                    f'<div class="flag-wrapper flag-right"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_fora}.png" width="64" height="48"/></div>'
-                    if codigo_fora
-                    else '<div class="flag-wrapper flag-right"></div>'
-                )
-                st.markdown(img_fora, unsafe_allow_html=True)
-
-            palpites_submetidos.append(
-                {
-                    "jogo_id": jogo_id,
-                    "golos_casa": st.session_state.get(f"golos_casa_{jogo_id}", int(palpite.get("golos_casa") or 0)),
-                    "golos_fora": st.session_state.get(f"golos_fora_{jogo_id}", int(palpite.get("golos_fora") or 0)),
-                }
-            )
-            # reserved space for showing the real result after the match
-            st.markdown('<div class="result-space"></div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-            st.divider()
+                    # small reserved space for result display
+                    st.markdown('<div class="result-space"></div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    st.divider()
 
     if guardar:
         try:
@@ -873,8 +846,25 @@ def exibir_jogos() -> None:
     if utilizador_autenticado():
         renderizar_formulario_palpites(jogos)
     else:
-        for jogo in jogos:
-            renderizar_jogo_somente_leitura(jogo)
+        # group matches by jornada for read-only view as well
+        from collections import defaultdict
+        jogos_por_jornada: dict[str, list[dict]] = defaultdict(list)
+        for j in jogos:
+            chave = j.get("jornada") or j.get("matchday") or j.get("round") or ""
+            jogos_por_jornada[str(chave)].append(j)
+
+        def _j_key(k: str):
+            try:
+                return (0, int(k))
+            except Exception:
+                return (1, k)
+
+        jornadas = sorted(jogos_por_jornada.keys(), key=_j_key)
+        tabs = st.tabs([str(j) if str(j) else "All" for j in jornadas])
+        for idx, jlabel in enumerate(jornadas):
+            with tabs[idx]:
+                for jogo in jogos_por_jornada[jlabel]:
+                    renderizar_jogo_somente_leitura(jogo)
 
 
 init_auth_state()
