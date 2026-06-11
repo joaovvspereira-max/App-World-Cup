@@ -1,4 +1,4 @@
-"""Operações sobre a tabela de jogos."""
+"""Operations on the matches table."""
 
 from typing import Any
 
@@ -8,20 +8,20 @@ from database.supabase_client import get_supabase_client
 
 
 def get_jogos() -> list[dict[str, Any]]:
-    """Carrega todos os jogos da base de dados, ordenados por ID."""
+    """Load all matches from the database, ordered by ID."""
     client = get_supabase_client()
     response = client.table("jogos").select("*").order("id").execute()
     return response.data or []
 
 
 def jogos_para_dataframe(jogos: list[dict[str, Any]]) -> pd.DataFrame:
-    """Converte a lista de jogos num DataFrame formatado para exibição."""
+    """Convert the list of matches into a DataFrame formatted for display."""
     if not jogos:
         return pd.DataFrame(
             columns=[
                 "ID",
-                "Equipa Casa",
-                "Equipa Fora",
+                "Home Team",
+                "Away Team",
                 "Resultado",
                 "Fase",
             ]
@@ -39,8 +39,8 @@ def jogos_para_dataframe(jogos: list[dict[str, Any]]) -> pd.DataFrame:
     return df.rename(
         columns={
             "id": "ID",
-            "equipa_casa": "Equipa Casa",
-            "equipa_fora": "Equipa Fora",
+            "equipa_casa": "Home Team",
+            "equipa_fora": "Away Team",
             "fase": "Fase",
         }
     )[["ID", "Equipa Casa", "Equipa Fora", "Resultado", "Fase"]]

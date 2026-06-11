@@ -1,26 +1,26 @@
-"""Previsões especiais: vencedor do mundial e melhor marcador."""
+"""Special predictions: World Cup winner and top scorer."""
 
 from datetime import datetime, timezone
 from typing import Any
 
 from database.supabase_client import get_supabase_client
 
-OPCAO_OUTRO = "Outro..."
+OPCAO_OUTRO = "Other..."
 
 PAISES_ELITE = [
     "Portugal",
-    "Brasil",
-    "França",
+    "Brazil",
+    "France",
     "Argentina",
-    "Países Baixos",
-    "Bélgica",
-    "Alemanha",
-    "Espanha",
-    "Inglaterra",
-    "Croácia",
-    "Uruguai",
-    "EUA",
-    "México",
+    "Netherlands",
+    "Belgium",
+    "Germany",
+    "Spain",
+    "England",
+    "Croatia",
+    "Uruguay",
+    "United States",
+    "Mexico",
     OPCAO_OUTRO,
 ]
 
@@ -47,7 +47,7 @@ JOGADORES_ELITE = [
 
 
 def get_palpite_macro(user_id: str) -> dict[str, Any] | None:
-    """Carrega o registo único de previsões macro do utilizador."""
+    """Load the single macro prediction record for the user."""
     client = get_supabase_client()
     response = (
         client.table("palpites_macro")
@@ -64,7 +64,7 @@ def guardar_palpite_macro(
     vencedor_mundial: str,
     melhor_marcador: str,
 ) -> dict[str, Any]:
-    """Insere ou atualiza o registo único de previsões macro do utilizador."""
+    """Insert or update the user's single macro prediction record."""
     client = get_supabase_client()
     payload = {
         "user_id": user_id,

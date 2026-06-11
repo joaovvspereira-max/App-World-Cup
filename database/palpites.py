@@ -1,4 +1,4 @@
-"""Operações sobre a tabela de palpites."""
+"""Operations on the predictions (palpites) table."""
 
 from typing import Any
 
@@ -8,12 +8,12 @@ from database.supabase_client import get_supabase_client
 def calcular_pontos_jogo(p_casa: int, p_fora: int, r_casa: int | None, r_fora: int | None) -> int:
     """Calcula os pontos de um único jogo segundo as regras fornecidas.
 
-    Regras:
-    - Tendência correta: +3
-    - Diferença exacta (apenas se tendência correcta): +3
-    - Golos casa exactos: +2
-    - Golos fora exactos: +2
-    Jogos sem resultado real devolvem 0.
+    Rules:
+    - Correct trend: +3
+    - Exact goal difference (only if trend correct): +3
+    - Exact home goals: +2
+    - Exact away goals: +2
+    Matches without real result return 0.
     """
     if r_casa is None or r_fora is None:
         return 0
@@ -35,35 +35,35 @@ def calcular_pontos_jogo(p_casa: int, p_fora: int, r_casa: int | None, r_fora: i
 def get_ranking() -> list[dict]:
     """Compila o ranking baseado em todos os palpites e resultados reais.
 
-    Retorna uma lista de dicionários com as chaves:
-    - user_id, nome, pontos_totais, palpites (lista de detalhes por jogo)
+    Returns a list of dicts with keys:
+    - user_id, nome, pontos_totais, palpites (list of per-game details)
 
-    Tenta também ler uma tabela opcional `resultado_macro` para obter o
-    `vencedor_mundial` e `melhor_marcador` reais — se não existir, não aplica bónus.
+    Also attempts to read an optional `resultado_macro` table to obtain the
+    real `vencedor_mundial` and `melhor_marcador` — if missing, bonuses are not applied.
     """
     client = get_supabase_client()
 
-    # Carrega jogos com resultados reais
+    # Load matches with real results
     jogos_resp = client.table("jogos").select(
         "id, equipa_casa, equipa_fora, golos_casa_real, golos_fora_real, fase, data"
     ).execute()
     jogos = {row["id"]: row for row in (jogos_resp.data or [])}
 
-    # Carrega todos os palpites
+    # Load all predictions
     palpites_resp = client.table("palpites").select(
         "utilizador_id, jogo_id, golos_casa_palpite, golos_fora_palpite"
     ).execute()
     palpites = palpites_resp.data or []
 
-    # Carrega perfis para mapear nome
+    # Load profiles to map names
     perfis_resp = client.table("perfis").select("id, username").execute()
     perfis = {row["id"]: row.get("username") or row["id"] for row in (perfis_resp.data or [])}
 
-    # Carrega palpites_macro por utilizador (vencedor_mundial, melhor_marcador)
+    # Load macro predictions per user (vencedor_mundial, melhor_marcador)
     macro_resp = client.table("palpites_macro").select("user_id, vencedor_mundial, melhor_marcador").execute()
     macros = {row["user_id"]: row for row in (macro_resp.data or [])}
 
-    # Tenta obter resultado oficial macro (opcional)
+    # Attempt to obtain official macro result (optional)
     vencedor_real = None
     melhor_marcador_real = None
     try:
@@ -76,7 +76,7 @@ def get_ranking() -> list[dict]:
         vencedor_real = None
         melhor_marcador_real = None
 
-    # Agrega pontos por utilizador
+    # Aggregate points per user
     usuarios: dict[str, dict] = {}
 
     for p in palpites:
@@ -122,7 +122,7 @@ def get_ranking() -> list[dict]:
             }
         )
 
-    # Aplica bónus macro por utilizador
+    # Apply macro bonuses per user
     for uid, usuario in usuarios.items():
         macro = macros.get(uid)
         if not macro:
@@ -135,7 +135,7 @@ def get_ranking() -> list[dict]:
         usuario["pontos_totais"] += bonus
         usuario["bonus_aplicado"] = bonus
 
-    # Converte para lista ordenada
+    # Convert to sorted list
     ranking = sorted(usuarios.values(), key=lambda u: u["pontos_totais"], reverse=True)
     return ranking
 

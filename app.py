@@ -1,4 +1,4 @@
-"""Aplicação Streamlit — Mundial 2026."""
+"""Streamlit app — World Cup 2026."""
 
 from datetime import date, datetime
 from typing import Any
@@ -14,6 +14,7 @@ import urllib.parse
 import json
 import time
 import unicodedata
+import difflib
 from database.palpites import (
     get_palpites_utilizador,
     guardar_palpites_em_lote,
@@ -29,7 +30,7 @@ from database.palpites_macro import (
 )
 
 st.set_page_config(
-    page_title="Mundial 2026",
+    page_title="World Cup 2026",
     page_icon="⚽",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -113,22 +114,114 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Mapeamento de países para códigos de bandeira (flagcdn usa códigos ISO 2-letters)
+# Mapping of countries to flag codes (flagcdn uses ISO 2-letter codes)
 DEFAULT_FLAG_MAP = {
-    "Portugal": "pt",
-    "Brasil": "br",
-    "Espanha": "es",
-    "França": "fr",
-    "Alemanha": "de",
+    # English keys (existing)
+    "South Africa": "za",
+    "Germany": "de",
+    "Saudi Arabia": "sa",
+    "Algeria": "dz",
     "Argentina": "ar",
+    "Australia": "au",
+    "Austria": "at",
+    "Belgium": "be",
+    "Brazil": "br",
+    "Bosnia and Herzegovina": "ba",
+    "Canada": "ca",
+    "Qatar": "qa",
+    "Czechia": "cz",
+    "Colombia": "co",
+    "Curaçao": "cw",
+    "Cape Verde": "cv",
+    "South Korea": "kr",
+    "Ivory Coast": "ci",
+    "DR Congo": "cd",
+    "Egypt": "eg",
+    "Ecuador": "ec",
+    "Scotland": "gb",
+    "Spain": "es",
+    "United States": "us",
+    "France": "fr",
+    "Ghana": "gh",
+    "Haiti": "ht",
+    "England": "gb",
+    "Iran": "ir",
+    "Iraq": "iq",
+    "Italy": "it",
+    "Japan": "jp",
+    "Jordan": "jo",
+    "Morocco": "ma",
+    "Mexico": "mx",
+    "New Zealand": "nz",
+    "Netherlands": "nl",
+    "Norway": "no",
+    "Paraguay": "py",
+    "Portugal": "pt",
+    "Panama": "pa",
+    "Senegal": "sn",
+    "Sweden": "se",
+    "Switzerland": "ch",
+    "Tunisia": "tn",
+    "Turkey": "tr",
+    "Uruguay": "uy",
+    "Uzbekistan": "uz",
+
+    # Portuguese keys (as stored in DB)
+    "México": "mx",
+    "África do Sul": "za",
+    "Coreia do Sul": "kr",
+    "Chéquia": "cz",
+    "Canadá": "ca",
+    "Bósnia e Herzegovina": "ba",
+    "Estados Unidos": "us",
+    "Paraguai": "py",
+    "Haiti": "ht",
+    "Escócia": "gb",
+    "Austrália": "au",
+    "Turquia": "tr",
+    "Marrocos": "ma",
+    "Catar": "qa",
+    "Suíça": "ch",
+    "Costa do Marfim": "ci",
+    "Equador": "ec",
+    "Curaçao": "cw",
+    "Países Baixos": "nl",
+    "Japão": "jp",
+    "Suécia": "se",
+    "Tunísia": "tn",
+    "Arábia Saudita": "sa",
+    "Uruguai": "uy",
+    "Espanha": "es",
+    "Cabo Verde": "cv",
+    "Irão": "ir",
+    "Nova Zelândia": "nz",
+    "Bélgica": "be",
+    "Egito": "eg",
+    "França": "fr",
+    "Senegal": "sn",
+    "Iraque": "iq",
+    "Noruega": "no",
+    "Argentina": "ar",
+    "Argélia": "dz",
+    "Áustria": "at",
+    "Jordânia": "jo",
+    "Gana": "gh",
+    "Panamá": "pa",
+    "Inglaterra": "gb",
+    "Croácia": "hr",
+    "Portugal": "pt",
+    "República Democrática do Congo": "cd",
+    "Usbequistão": "uz",
+    "Colômbia": "co",
 }
-ALIASES = {
-    "EUA": "United States",
-    "Países Baixos": "Netherlands",
-    "Inglaterra": "United Kingdom",
-    "Coreia do Sul": "Korea, Republic of",
-    "Irão": "Iran",
-}
+# Note: ALIASES removed — matching uses fuzzy/name heuristics now.
+
+# Clear any previously cached flag map so updated defaults take effect immediately.
+try:
+    if hasattr(st, "session_state") and st.session_state.get("_flag_map_cache"):
+        st.session_state.pop("_flag_map_cache", None)
+except Exception:
+    pass
 
 
 def _normalize(text: str) -> str:
@@ -166,6 +259,7 @@ def build_flag_map_from_db() -> dict:
 
     # Build a lookup of country names -> cca2 by fetching all countries once
     name_lookup: dict[str, str] = {}
+    country_records: list[dict] = []
     try:
         with urllib.request.urlopen("https://restcountries.com/v3.1/all", timeout=10) as u:
             all_c = json.load(u)
@@ -173,28 +267,33 @@ def build_flag_map_from_db() -> dict:
                 cca2 = c.get("cca2")
                 if not cca2:
                     continue
-                # common and official names
-                names_to_index = []
+                # collect all possible name variants for robust matching
                 name_obj = c.get("name") or {}
                 common = name_obj.get("common")
                 official = name_obj.get("official")
+                variants = set()
                 if common:
-                    names_to_index.append(common)
+                    variants.add(common)
                 if official:
-                    names_to_index.append(official)
-                # altSpellings
+                    variants.add(official)
                 for alt in c.get("altSpellings", []) or []:
-                    names_to_index.append(alt)
-                # translations
+                    variants.add(alt)
                 for t in (c.get("translations") or {}).values():
                     tn = t.get("common")
                     if tn:
-                        names_to_index.append(tn)
+                        variants.add(tn)
 
-                for nm in names_to_index:
+                # also add the variants normalized into lookup
+                for nm in variants:
                     key = _normalize(nm)
                     if key:
                         name_lookup[key] = cca2.lower()
+
+                country_records.append({
+                    "cca2": cca2.lower(),
+                    "variants": [ _normalize(v) for v in variants if v ],
+                    "all_variants": list(variants),
+                })
             # be polite
             time.sleep(0.05)
     except Exception:
@@ -206,13 +305,41 @@ def build_flag_map_from_db() -> dict:
             continue
         norm = _normalize(nome)
         code = name_lookup.get(norm)
-        if not code:
-            # try alias mapping
-            alias = ALIASES.get(nome)
-            if alias:
-                code = name_lookup.get(_normalize(alias))
+        # no explicit aliases available — try fuzzy/substring/token heuristics
+        # try exact substring/token or fuzzy matching against country_records
+        if not code and country_records:
+            # 1) exact variant contains / is contained
+            for rec in country_records:
+                for v in rec["variants"]:
+                    if v == norm or v in norm or norm in v:
+                        code = rec["cca2"]
+                        break
+                if code:
+                    break
+
+        # 2) difflib close matches on normalized keys
+        if not code and name_lookup:
+            close = difflib.get_close_matches(norm, list(name_lookup.keys()), n=1, cutoff=0.8)
+            if close:
+                code = name_lookup.get(close[0])
+
+        # 3) token overlap heuristic
+        if not code and country_records:
+            tokens = set(norm.split())
+            best = (None, 0)
+            for rec in country_records:
+                for v in rec["variants"]:
+                    v_tokens = set(v.split())
+                    inter = len(tokens & v_tokens)
+                    if inter > best[1]:
+                        best = (rec["cca2"], inter)
+            if best[0] and best[1] >= 1:
+                code = best[0]
+
         if code:
             flag_map[nome] = code
+        else:
+            flag_map[nome] = ""
 
     # save cache
     st.session_state["_flag_map_cache"] = flag_map
@@ -304,17 +431,17 @@ def resolver_valor_previsao(selecionado: str, outro_texto: str) -> str:
 
 
 def renderizar_previsoes_macro() -> None:
-    """Secção de previsões especiais: campeão do mundial e melhor marcador."""
-    st.subheader("Previsões de Campeão e Melhor Marcador")
+    """Special predictions section: World Cup winner and top scorer."""
+    st.subheader("Special Predictions: Winner & Top Scorer")
 
     if not utilizador_autenticado():
-        st.caption("Inicia sessão na barra lateral para guardar as tuas previsões especiais.")
+        st.caption("Sign in in the sidebar to save your special predictions.")
         return
 
     try:
         palpite_macro = get_palpite_macro(st.session_state.user_id)
     except Exception as exc:
-        st.error(f"Não foi possível carregar as tuas previsões especiais: {exc}")
+        st.error(f"Could not load your special predictions: {exc}")
         return
 
     idx_vencedor, outro_vencedor = preparar_opcao_selectbox(
@@ -354,7 +481,7 @@ def renderizar_previsoes_macro() -> None:
             )
 
         guardar_macro = st.form_submit_button(
-            "Guardar previsões especiais",
+            "Save special predictions",
             use_container_width=True,
         )
 
@@ -375,15 +502,15 @@ def renderizar_previsoes_macro() -> None:
                 vencedor_mundial=vencedor,
                 melhor_marcador=marcador,
             )
-            st.success("Previsões especiais guardadas com sucesso.")
+            st.success("Special predictions saved successfully.")
             st.rerun()
         except Exception as exc:
-            st.error(f"Erro ao guardar previsões especiais: {exc}")
+                st.error(f"Error saving special predictions: {exc}")
 
 
 def renderizar_ranking() -> None:
-    """Secção de Ranking: tabela principal e expanders por utilizador."""
-    st.subheader("Ranking — Classificação Geral")
+    """Ranking section: leaderboard table and per-user expanders."""
+    st.subheader("Ranking — Overall Standings")
 
     try:
         ranking = get_ranking()
@@ -397,9 +524,9 @@ def renderizar_ranking() -> None:
 
     # DataFrame para a tabela de liderança
     df = pd.DataFrame(
-        [{"Nome": r.get("nome"), "Pontos": r.get("pontos_totais", 0)} for r in ranking]
+        [{"Name": r.get("nome"), "Points": r.get("pontos_totais", 0)} for r in ranking]
     )
-    df = df.sort_values(by="Pontos", ascending=False).reset_index(drop=True)
+    df = df.sort_values(by="Points", ascending=False).reset_index(drop=True)
 
     st.dataframe(df, use_container_width=True)
 
@@ -412,29 +539,29 @@ def renderizar_ranking() -> None:
 
         with st.expander(f"{nome} — {pontos} pts{' (+' + str(bonus) + ' bonus)' if bonus else ''}"):
             if not detalhes:
-                st.write("Sem palpites finalizados.")
+                st.write("No finalized predictions.")
                 continue
             detalhes_df = pd.DataFrame(detalhes)
-            # Coloca a descrição do jogo como primeira coluna
-            detalhes_df["Jogo"] = detalhes_df.apply(lambda r: f"{r['equipa_casa']} vs {r['equipa_fora']}", axis=1)
-            detalhes_df = detalhes_df[["Jogo", "palpite", "resultado_real", "pontos"]]
-            detalhes_df = detalhes_df.rename(columns={"palpite": "Palpite", "resultado_real": "Resultado Real", "pontos": "Pontos"})
+            # Place match description as the first column
+            detalhes_df["Match"] = detalhes_df.apply(lambda r: f"{r['equipa_casa']} vs {r['equipa_fora']}", axis=1)
+            detalhes_df = detalhes_df[["Match", "palpite", "resultado_real", "pontos"]]
+            detalhes_df = detalhes_df.rename(columns={"palpite": "Prediction", "resultado_real": "Actual Result", "pontos": "Points"})
             st.table(detalhes_df)
 
 
 def renderizar_auth() -> None:
-    """Formulário de login e registo na barra lateral."""
+    """Login and register form in the sidebar."""
     with st.sidebar:
-        st.header("Entrar na app")
-        st.caption("Inicia sessão ou cria uma conta para submeter palpites.")
+        st.header("Sign In")
+        st.caption("Sign in or create an account to submit predictions.")
 
-        tab_login, tab_registo = st.tabs(["Login", "Registo"])
+        tab_login, tab_registo = st.tabs(["Login", "Register"])
 
         with tab_login:
             with st.form("form_login", clear_on_submit=False):
                 email = st.text_input("Email", placeholder="tu@email.com")
                 password = st.text_input("Password", type="password")
-                login_submetido = st.form_submit_button("Entrar", use_container_width=True)
+                login_submetido = st.form_submit_button("Sign In", use_container_width=True)
 
             if login_submetido:
                 try:
@@ -442,7 +569,7 @@ def renderizar_auth() -> None:
                     st.session_state.user_id = dados["user_id"]
                     st.session_state.user_name = dados["user_name"]
                     st.session_state.user_email = dados.get("user_email")
-                    st.success(f"Bem-vindo, {dados['user_name']}!")
+                    st.success(f"Welcome, {dados['user_name']}!")
                     st.rerun()
                 except AuthError as exc:
                     st.error(str(exc))
@@ -454,7 +581,7 @@ def renderizar_auth() -> None:
                 nome = st.text_input("Nome", placeholder="O teu nome")
                 email = st.text_input("Email", placeholder="tu@email.com")
                 password = st.text_input("Password", type="password")
-                registo_submetido = st.form_submit_button("Criar conta", use_container_width=True)
+                registo_submetido = st.form_submit_button("Create account", use_container_width=True)
 
             if registo_submetido:
                 try:
@@ -462,64 +589,64 @@ def renderizar_auth() -> None:
                     st.session_state.user_id = dados["user_id"]
                     st.session_state.user_name = dados["user_name"]
                     st.session_state.user_email = dados.get("user_email")
-                    st.success("Conta criada com sucesso!")
+                    st.success("Account created successfully!")
                     st.rerun()
                 except AuthError as exc:
                     st.error(str(exc))
                 except Exception as exc:
-                    st.error(f"Erro ao criar conta: {exc}")
+                    st.error(f"Error creating account: {exc}")
 
 
 def renderizar_barra_lateral() -> None:
-    """Mostra autenticação ou informação da conta consoante o estado da sessão."""
+    """Shows authentication or account info depending on session state."""
     # Auth/account area in the sidebar
     if not utilizador_autenticado():
         renderizar_auth()
         return
 
     with st.sidebar:
-        st.header("Conta")
-        st.markdown(f"Olá, **{st.session_state.user_name}**")
-        if st.button("Terminar sessão", use_container_width=True):
+        st.header("Account")
+        st.markdown(f"Hello, **{st.session_state.user_name}**")
+        if st.button("Sign Out", use_container_width=True):
             terminar_sessao()
             st.rerun()
 
 
 def selecionar_pagina() -> str:
-    """Mostra um selector na barra lateral e devolve a página escolhida."""
+    """Show a sidebar selector and return the chosen page."""
     with st.sidebar:
-        st.header("Navegação")
+        st.header("Navigation")
         opcoes = [
-            "Página Inicial",
-            "Calendário",
-            "Previsões Especiais",
-            "Ranking - Classificação Geral",
+            "Home",
+            "Schedule",
+            "Special Predictions",
+            "Ranking - Overall Standings",
         ]
         # Mostrar Admin apenas para o email definido em secrets
         admin_email = st.secrets.get("ADMIN_EMAIL") if isinstance(st.secrets, dict) or hasattr(st, 'secrets') else None
         if st.session_state.get("user_email") and admin_email and st.session_state.get("user_email") == admin_email:
             opcoes.append("Admin")
 
-        escolha = st.radio("Ir para", opcoes, index=0)
+        escolha = st.radio("Go to", opcoes, index=0)
     return escolha
 
 
 def renderizar_admin() -> None:
-    """Área administrativa — apenas acessível ao email definido em `st.secrets['ADMIN_EMAIL']`."""
-    st.subheader("Área Administrativa")
+    """Admin area — only accessible to the email defined in `st.secrets['ADMIN_EMAIL']`."""
+    st.subheader("Admin Area")
 
     if not utilizador_autenticado():
-        st.warning("Inicia sessão com a conta de administrador para aceder a esta área.")
+        st.warning("Sign in with the administrator account to access this area.")
         return
 
     admin_email = st.secrets.get("ADMIN_EMAIL")
     if not admin_email or st.session_state.get("user_email") != admin_email:
-        st.warning("Não estás autorizado a aceder a esta página.")
+        st.warning("You are not authorized to access this page.")
         return
 
     client = get_supabase_client()
 
-    st.markdown("**Inserir / Atualizar resultado de jogo**")
+    st.markdown("**Insert / Update match result**")
     try:
         jogos = get_jogos()
     except Exception as exc:
@@ -528,32 +655,31 @@ def renderizar_admin() -> None:
 
     if jogos:
         escolhas = [f"{j['id']} — {j.get('equipa_casa','?')} vs {j.get('equipa_fora','?')} ({formatar_info_jogo(j)})" for j in jogos]
-        idx = st.selectbox("Escolhe o jogo", range(len(escolhas)), format_func=lambda i: escolhas[i])
+        idx = st.selectbox("Choose match", range(len(escolhas)), format_func=lambda i: escolhas[i])
         jogo = jogos[idx]
-
         with st.form("form_resultado"):
-            golos_casa = st.number_input("Golos casa (real)", min_value=0, value=int(jogo.get("golos_casa_real") or 0), key="admin_golos_casa")
-            golos_fora = st.number_input("Golos fora (real)", min_value=0, value=int(jogo.get("golos_fora_real") or 0), key="admin_golos_fora")
-            guardar_res = st.form_submit_button("Guardar Resultado")
+            golos_casa = st.number_input("Home goals (actual)", min_value=0, value=int(jogo.get("golos_casa_real") or 0), key="admin_golos_casa")
+            golos_fora = st.number_input("Away goals (actual)", min_value=0, value=int(jogo.get("golos_fora_real") or 0), key="admin_golos_fora")
+            guardar_res = st.form_submit_button("Save Result")
 
         if guardar_res:
             try:
                 client.table("jogos").update({"golos_casa_real": int(golos_casa), "golos_fora_real": int(golos_fora)}).eq("id", jogo["id"]).execute()
-                st.success("Resultado guardado com sucesso.")
+                st.success("Result saved successfully.")
                 st.rerun()
             except Exception as exc:
-                st.error(f"Erro ao guardar resultado: {exc}")
+                st.error(f"Error saving result: {exc}")
 
     st.markdown("---")
-    st.markdown("**Criar novo jogo (fase de grupos)**")
+    st.markdown("**Create new match (group stage)**")
     with st.form("form_criar_jogo"):
-        equipa_casa = st.text_input("Equipa Casa")
-        equipa_fora = st.text_input("Equipa Fora")
-        data_jogo = st.date_input("Data")
-        fase = st.text_input("Fase", value="Grupos")
-        grupo = st.text_input("Grupo")
-        cidade = st.text_input("Cidade")
-        criar = st.form_submit_button("Criar Jogo")
+        equipa_casa = st.text_input("Home Team")
+        equipa_fora = st.text_input("Away Team")
+        data_jogo = st.date_input("Date")
+        fase = st.text_input("Stage", value="Groups")
+        grupo = st.text_input("Group")
+        cidade = st.text_input("City")
+        criar = st.form_submit_button("Create Match")
 
     if criar:
         try:
@@ -566,14 +692,14 @@ def renderizar_admin() -> None:
                 "cidade": cidade.strip(),
             }
             client.table("jogos").insert(payload).execute()
-            st.success("Jogo criado com sucesso.")
+            st.success("Match created successfully.")
             st.rerun()
         except Exception as exc:
-            st.error(f"Erro ao criar jogo: {exc}")
+            st.error(f"Error creating match: {exc}")
 
 
 def renderizar_jogo_somente_leitura(jogo: dict[str, Any]) -> None:
-    """Exibe um jogo sem inputs de palpite."""
+    """Display a match without prediction inputs."""
     st.markdown(f'<p class="jogo-meta">{formatar_info_jogo(jogo)}</p>', unsafe_allow_html=True)
 
     col_casa, col_sep, col_fora = st.columns([5, 1, 5])
@@ -592,11 +718,11 @@ def renderizar_jogo_somente_leitura(jogo: dict[str, Any]) -> None:
 
 
 def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
-    """Formulário global com palpites inline para todos os jogos."""
+    """Global form with inline predictions for all matches."""
     try:
         palpites_existentes = get_palpites_utilizador(st.session_state.user_id)
     except Exception as exc:
-        st.error(f"Não foi possível carregar os teus palpites: {exc}")
+        st.error(f"Could not load your predictions: {exc}")
         return
     # build dynamic flag map from DB
     flag_map = build_flag_map_from_db()
@@ -605,7 +731,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
     with st.form("form_palpites"):
         # sticky save button at top
         st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
-        guardar = st.form_submit_button("Guardar Palpites", use_container_width=False)
+        guardar = st.form_submit_button("Save Predictions", use_container_width=False)
         st.markdown('</div>', unsafe_allow_html=True)
 
         for jogo in jogos:
@@ -635,7 +761,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     )
                 with input_col:
                     golos_casa = st.number_input(
-                        "Golos casa",
+                        "Home goals",
                         min_value=0,
                         step=1,
                         value=int(palpite.get("golos_casa") or 0),
@@ -658,7 +784,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                 )
                 with input_col2:
                     golos_fora = st.number_input(
-                        "Golos fora",
+                        "Away goals",
                         min_value=0,
                         step=1,
                         value=int(palpite.get("golos_fora") or 0),
@@ -696,18 +822,18 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                 )
 
             guardar_palpites_em_lote(st.session_state.user_id, payloads)
-            st.success(f"{len(payloads)} palpite(s) guardado(s) com sucesso.")
+            st.success(f"{len(payloads)} prediction(s) saved successfully.")
             st.rerun()
         except Exception as exc:
-            st.error(f"Erro ao guardar palpites: {exc}")
+            st.error(f"Error saving predictions: {exc}")
 
 
 def exibir_jogos() -> None:
-    """Carrega os jogos e exibe o calendário com palpites inline."""
+    """Load matches and display schedule with inline predictions."""
     try:
         jogos = get_jogos()
     except Exception as exc:
-        st.error(f"Não foi possível carregar os jogos: {exc}")
+        st.error(f"Could not load matches: {exc}")
         return
 
     col1, col2 = st.columns(2)
@@ -717,10 +843,10 @@ def exibir_jogos() -> None:
         sum(1 for jogo in jogos if formatar_resultado_real(jogo) is not None),
     )
 
-    st.subheader("Calendário de jogos")
+    st.subheader("Match Schedule")
 
     if not jogos:
-        st.info("Ainda não existem jogos registados.")
+        st.info("No matches registered yet.")
         return
 
     if utilizador_autenticado():
@@ -734,11 +860,11 @@ init_auth_state()
 pagina = selecionar_pagina()
 renderizar_barra_lateral()
 
-st.markdown('<div class="sticky-header"><h1>⚽ Mundial 2026</h1></div>', unsafe_allow_html=True)
+st.markdown('<div class="sticky-header"><h1>⚽ World Cup 2026</h1></div>', unsafe_allow_html=True)
 
-if pagina == "Página Inicial":
+if pagina == "Home":
     st.markdown(
-        '<p class="subtitle">Bem-vindo à app de palpites — explora o Mundial 2026.</p>',
+        '<p class="subtitle">Welcome to the predictions app — explore World Cup 2026.</p>',
         unsafe_allow_html=True,
     )
 
@@ -753,29 +879,31 @@ if pagina == "Página Inicial":
         top3 = ranking[:3]
         df_top3 = pd.DataFrame([{"Posição": i + 1, "Nome": r.get("nome"), "Pontos": r.get("pontos_totais", 0)} for i, r in enumerate(top3)])
         st.subheader("Top 3")
+        # translate columns for display
+        df_top3 = pd.DataFrame([{"Position": i + 1, "Name": r.get("nome"), "Points": r.get("pontos_totais", 0)} for i, r in enumerate(top3)])
         st.table(df_top3)
     else:
-        st.info("Ainda não existem dados de ranking para apresentar.")
+        st.info("No ranking data to display yet.")
 
-elif pagina == "Calendário":
+elif pagina == "Schedule":
     st.markdown(
-        '<p class="subtitle">Consulta o calendário e submete os teus palpites.</p>',
+        '<p class="subtitle">Browse the schedule and submit your predictions.</p>',
         unsafe_allow_html=True,
     )
     if not utilizador_autenticado():
-        st.info("Inicia sessão na barra lateral para editar e guardar palpites.")
+        st.info("Sign in in the sidebar to edit and save predictions.")
     exibir_jogos()
 
-elif pagina == "Previsões Especiais":
+elif pagina == "Special Predictions":
     st.markdown(
-        '<p class="subtitle">Vê e guarda o teu vencedor do Mundial e melhor marcador.</p>',
+        '<p class="subtitle">View and save your World Cup winner and top scorer predictions.</p>',
         unsafe_allow_html=True,
     )
     renderizar_previsoes_macro()
 
-elif pagina == "Ranking - Classificação Geral":
+elif pagina == "Ranking - Overall Standings":
     st.markdown(
-        '<p class="subtitle">Classificação geral dos participantes.</p>',
+        '<p class="subtitle">Overall leaderboard of participants.</p>',
         unsafe_allow_html=True,
     )
     renderizar_ranking()
