@@ -846,32 +846,39 @@ def renderizar_admin() -> None:
 
                 st.success(f"Result saved and updated {updated} prediction(s) with points.")
                 st.rerun()
+                st.experimental_rerun()
 
-            # If jogo id is greater than 72, allow editing the team names
+    # Persistent edit-teams form for matches with id > 72
+    try:
+        jogo_id_val = int(jogo.get("id"))
+    except Exception:
+        jogo_id_val = None
+
+    if jogo_id_val and jogo_id_val > 72:
+        st.markdown("---")
+        st.markdown("**Edit teams for this match**")
+        with st.form(f"form_edit_teams_{jogo.get('id')}"):
+            new_casa = st.text_input("Home Team Name", value=str(jogo.get("equipa_casa") or ""))
+            new_fora = st.text_input("Away Team Name", value=str(jogo.get("equipa_fora") or ""))
+            guardar_equipas = st.form_submit_button("Save Teams")
+
+        if guardar_equipas:
             try:
-                jogo_id_val = int(jogo.get("id"))
-            except Exception:
-                jogo_id_val = None
-
-            if jogo_id_val and jogo_id_val > 72:
-                st.markdown("---")
-                st.markdown("**Edit teams for this match**")
-                with st.form(f"form_edit_teams_{jogo.get('id')}"):
-                    new_casa = st.text_input("Home Team Name", value=str(jogo.get("equipa_casa") or ""))
-                    new_fora = st.text_input("Away Team Name", value=str(jogo.get("equipa_fora") or ""))
-                    guardar_equipas = st.form_submit_button("Save Teams")
-
-                if guardar_equipas:
-                    try:
-                        payload = {
-                            "equipa_casa": new_casa.strip(),
-                            "equipa_fora": new_fora.strip(),
-                        }
-                        client.table("jogos").update(payload).eq("id", jogo.get("id")).execute()
-                        st.success("Teams updated successfully.")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Error updating teams: {exc}")
+                payload = {
+                    "equipa_casa": new_casa.strip(),
+                    "equipa_fora": new_fora.strip(),
+                }
+                client.table("jogos").update(payload).eq("id", jogo.get("id")).execute()
+                # clear flag map cache so updated team names refresh flags
+                try:
+                    if st.session_state.get("_flag_map_cache"):
+                        st.session_state.pop("_flag_map_cache", None)
+                except Exception:
+                    pass
+                st.success("Teams updated successfully.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Error updating teams: {exc}")
 
     # (Create new match removed: admin page now only updates existing match results)
 
