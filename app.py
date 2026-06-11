@@ -92,9 +92,11 @@ st.markdown(
             font-weight: 700;
             color: #5C6B7A;
         }
-        img.flag-icon { border-radius: 10px; vertical-align: middle; border: 1px solid #E6E9EE; background: white; padding: 2px; object-fit: cover; }
-        .flag-wrapper { display:flex; align-items:center; justify-content:center; width:56px; }
-        .team-block { display:flex; align-items:center; gap:0.75rem; justify-content:center; }
+        img.flag-icon { border-radius: 12px; vertical-align: middle; border: 1px solid #E6E9EE; background: white; padding: 2px; object-fit: cover; }
+        .flag-wrapper { display:flex; align-items:center; width:96px; }
+        .flag-left { justify-content:flex-start; }
+        .flag-right { justify-content:flex-end; }
+        .team-block { display:flex; align-items:center; gap:0.75rem; justify-content:center; min-height:48px; }
 
         /* Estilo global para inputs numéricos de golos */
         input[type="number"] {
@@ -107,10 +109,11 @@ st.markdown(
             border: 1px solid #E6E9EE !important;
             width: 64px !important;
         }
-        .team-name { font-size: 1.15rem; font-weight:700; }
+        .team-name { font-size: 1.25rem; font-weight:800; }
         .jogo-card { text-align: center; padding: 0.9rem 1rem; }
         .jogo-equipa { justify-content: center; }
-        .result-space { height: 52px; }
+        .result-space { height: 64px; }
+        input[type="number"] { width: 60px !important; height:44px !important; }
         .sticky-header { position: sticky; top: 0; z-index: 1100; background: white; padding: 0.5rem 0; }
         .sticky-submit { position: sticky; top: 64px; z-index: 1050; background: white; padding: 0.5rem 0; display:flex; justify-content:center; }
     </style>
@@ -755,26 +758,26 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
             st.markdown(f'<div class="jogo-card">', unsafe_allow_html=True)
             st.markdown(f'<p class="jogo-meta">{formatar_info_jogo(jogo)}</p>', unsafe_allow_html=True)
 
-            col_left, col_mid, col_sep, col_mid2, col_right = st.columns([2.5, 1, 0.4, 1, 2.5])
+            # layout with 5 columns so flags are at the card edges and names sit between flag and central score
+            col_flag_left, col_name_left, col_sep, col_name_right, col_flag_right = st.columns([1, 3.6, 0.4, 3.6, 1])
 
-            with col_left:
-                # home: flag | name | input
-                flag_col, name_col, input_col = st.columns([0.6, 3.4, 1])
-                equipe_casa = jogo.get("equipa_casa", "—")
-                codigo_casa = flag_map.get(equipe_casa, "")
-                with flag_col:
-                    img_casa = (
-                        f'<div class="flag-wrapper"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_casa}.png" width="64" height="48"/></div>'
-                        if codigo_casa
-                        else '<div class="flag-wrapper"></div>'
-                    )
-                    st.markdown(img_casa, unsafe_allow_html=True)
-                with name_col:
-                    st.markdown(
-                        f'<div class="team-block"><span class="team-name">{equipe_casa}</span></div>',
-                        unsafe_allow_html=True,
-                    )
-                with input_col:
+            # left flag
+            equipe_casa = jogo.get("equipa_casa", "—")
+            codigo_casa = flag_map.get(equipe_casa, "")
+            with col_flag_left:
+                img_casa = (
+                    f'<div class="flag-wrapper flag-left"><img class="flag-icon" src="https://flagcdn.com/96x64/{codigo_casa}.png" width="96" height="64"/></div>'
+                    if codigo_casa
+                    else '<div class="flag-wrapper flag-left"></div>'
+                )
+                st.markdown(img_casa, unsafe_allow_html=True)
+
+            # left name + input (name aligned right so it's near center)
+            with col_name_left:
+                name_sub, input_sub = st.columns([3, 1])
+                with name_sub:
+                    st.markdown(f'<div style="text-align:right" class="team-block"><span class="team-name">{equipe_casa}</span></div>', unsafe_allow_html=True)
+                with input_sub:
                     golos_casa = st.number_input(
                         "Home goals",
                         min_value=0,
@@ -787,12 +790,16 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
             with col_sep:
                 st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
 
-            with col_right:
-                # away: input | name | flag
-                input_col2, name_col2, flag_col2 = st.columns([1, 3.4, 0.6])
-                equipe_fora = jogo.get("equipa_fora", "—")
-                codigo_fora = flag_map.get(equipe_fora, "")
-                with input_col2:
+            # center separator (dash)
+            with col_sep:
+                st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
+
+            # right name + input (input near center, name left-aligned)
+            equipe_fora = jogo.get("equipa_fora", "—")
+            codigo_fora = flag_map.get(equipe_fora, "")
+            with col_name_right:
+                input_sub2, name_sub2 = st.columns([1, 3])
+                with input_sub2:
                     golos_fora = st.number_input(
                         "Away goals",
                         min_value=0,
@@ -801,18 +808,17 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                         key=f"golos_fora_{jogo_id}",
                         label_visibility="collapsed",
                     )
-                with name_col2:
-                    st.markdown(
-                        f'<div class="team-block"><span class="team-name">{equipe_fora}</span></div>',
-                        unsafe_allow_html=True,
-                    )
-                with flag_col2:
-                    img_fora = (
-                        f'<div class="flag-wrapper"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_fora}.png" width="64" height="48"/></div>'
-                        if codigo_fora
-                        else '<div class="flag-wrapper"></div>'
-                    )
-                    st.markdown(img_fora, unsafe_allow_html=True)
+                with name_sub2:
+                    st.markdown(f'<div style="text-align:left" class="team-block"><span class="team-name">{equipe_fora}</span></div>', unsafe_allow_html=True)
+
+            # right flag
+            with col_flag_right:
+                img_fora = (
+                    f'<div class="flag-wrapper flag-right"><img class="flag-icon" src="https://flagcdn.com/96x64/{codigo_fora}.png" width="96" height="64"/></div>'
+                    if codigo_fora
+                    else '<div class="flag-wrapper flag-right"></div>'
+                )
+                st.markdown(img_fora, unsafe_allow_html=True)
 
             palpites_submetidos.append(
                 {
