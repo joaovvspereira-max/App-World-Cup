@@ -418,6 +418,9 @@ def formatar_info_jogo(jogo: dict[str, Any]) -> str:
 
     data = formatar_data_jogo(jogo.get("data"))
     if data:
+        hora = jogo.get("hora_jogo")
+        if hora:
+            data = f"{data} · {hora}"
         partes.append(data)
 
     if jogo.get("fase"):
@@ -1142,6 +1145,39 @@ def exibir_jogos() -> None:
     if not jogos:
         st.info("No matches registered yet.")
         return
+
+    # Ordenar jogos por data e hora
+    def _ordenar_por_data_hora(jogo: dict) -> tuple:
+        """Retorna tupla para ordenação por data e hora."""
+        data = jogo.get("data", "")
+        hora = jogo.get("hora_jogo", "")
+        
+        # Tenta converter data para formato ordenável
+        try:
+            # Assumindo formato "DD Mon YYYY" ou similar
+            from datetime import datetime
+            if data:
+                # Adapte o formato conforme necessário
+                data_obj = datetime.strptime(str(data), "%d %b %Y")
+                data_timestamp = data_obj.timestamp()
+            else:
+                data_timestamp = float('inf')
+        except Exception:
+            data_timestamp = float('inf')
+        
+        # Tenta converter hora para formato ordenável
+        try:
+            if hora:
+                hora_obj = datetime.strptime(str(hora), "%H:%M")
+                hora_timestamp = hora_obj.timestamp()
+            else:
+                hora_timestamp = 0
+        except Exception:
+            hora_timestamp = 0
+        
+        return (data_timestamp, hora_timestamp)
+    
+    jogos = sorted(jogos, key=_ordenar_por_data_hora)
 
     if utilizador_autenticado():
         renderizar_formulario_palpites(jogos)
