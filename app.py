@@ -142,6 +142,7 @@ st.markdown(
         .jogo-card { text-align: center; padding: 0.24rem 0.75rem; margin-top:0.125rem; border-bottom: 1px solid #E6E9EE; }
         .jogo-equipa { justify-content: center; }
         .result-space { height: 4px; }
+            .resultado-real { text-align: center; font-size: 1.05rem; font-weight: 700; color: #1A1A2E; margin: 0.25rem 0; }
         input[type="number"] { width: 56px !important; height:40px !important; }
         .sticky-header { position: sticky; top: 0; z-index: 1100; background: white; padding: 0.5rem 0; }
         .sticky-submit { display: none; }
@@ -822,6 +823,32 @@ def renderizar_admin() -> None:
                 st.success(f"Result saved and updated {updated} prediction(s) with points.")
                 st.rerun()
 
+            # If jogo id is greater than 72, allow editing the team names
+            try:
+                jogo_id_val = int(jogo.get("id"))
+            except Exception:
+                jogo_id_val = None
+
+            if jogo_id_val and jogo_id_val > 72:
+                st.markdown("---")
+                st.markdown("**Edit teams for this match**")
+                with st.form(f"form_edit_teams_{jogo.get('id')}"):
+                    new_casa = st.text_input("Home Team Name", value=str(jogo.get("equipa_casa") or ""))
+                    new_fora = st.text_input("Away Team Name", value=str(jogo.get("equipa_fora") or ""))
+                    guardar_equipas = st.form_submit_button("Save Teams")
+
+                if guardar_equipas:
+                    try:
+                        payload = {
+                            "equipa_casa": new_casa.strip(),
+                            "equipa_fora": new_fora.strip(),
+                        }
+                        client.table("jogos").update(payload).eq("id", jogo.get("id")).execute()
+                        st.success("Teams updated successfully.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Error updating teams: {exc}")
+
     # (Create new match removed: admin page now only updates existing match results)
 
 
@@ -959,14 +986,17 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                         with name_sub:
                             st.markdown(f'<div style="text-align:right" class="team-block"><span class="team-name">{equipe_casa}</span></div>', unsafe_allow_html=True)
                         with input_sub:
+                            # disable prediction input if real result exists
+                            disabled = jogo.get("golos_casa_real") is not None and jogo.get("golos_fora_real") is not None
                             golos_casa = st.number_input(
-                                "Home goals",
-                                min_value=0,
-                                step=1,
-                                value=int(palpite.get("golos_casa") or 0),
-                                key=f"golos_casa_{jogo_id}",
-                                label_visibility="collapsed",
-                            )
+                                    "Home goals",
+                                    min_value=0,
+                                    step=1,
+                                    value=int(palpite.get("golos_casa") or 0),
+                                    key=f"golos_casa_{jogo_id}",
+                                    label_visibility="collapsed",
+                                    disabled=disabled,
+                                )
 
                     with col_sep:
                         st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
@@ -977,6 +1007,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     with col_name_right:
                         input_sub2, name_sub2 = st.columns([1, 3])
                         with input_sub2:
+                            disabled = jogo.get("golos_casa_real") is not None and jogo.get("golos_fora_real") is not None
                             golos_fora = st.number_input(
                                 "Away goals",
                                 min_value=0,
@@ -984,6 +1015,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                                 value=int(palpite.get("golos_fora") or 0),
                                 key=f"golos_fora_{jogo_id}",
                                 label_visibility="collapsed",
+                                disabled=disabled,
                             )
                         with name_sub2:
                             st.markdown(f'<div style="text-align:left" class="team-block"><span class="team-name">{equipe_fora}</span></div>', unsafe_allow_html=True)
@@ -1025,9 +1057,9 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                             except Exception:
                                 pontos_palpite = 0
 
-                        st.markdown(f"Resultado real: {r_casa}-{r_fora}<br>+{pontos_palpite} pontos", unsafe_allow_html=True)
-                    # small reserved space for result display
-                    st.markdown('<div class="result-space"></div>', unsafe_allow_html=True)
+                        # show centered English text with larger font
+                        st.markdown(f'<p class="resultado-real">Actual result: {int(r_casa)}-{int(r_fora)}<br>+{pontos_palpite} points</p>', unsafe_allow_html=True)
+                    # do not render extra spacer when result exists
                     st.markdown('</div>', unsafe_allow_html=True)
 
                 # One Save button per jornada (after listing all matches in this tab)
