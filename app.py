@@ -858,27 +858,25 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     # compact separator handled by CSS; avoid Streamlit's default divider
                     # Save button for this jornada (submits the parent form)
                     st.markdown('<div class="save-card">', unsafe_allow_html=True)
-                    guardar_j = st.form_submit_button("💾 SAVE PREDICTIONS", key=f"save_{jlabel}", use_container_width=True)
+                    guardar_j = st.form_submit_button("💾 SAVE PREDICTIONS", key=f"save_{idx}_{jlabel}", use_container_width=True)
                     st.markdown('</div>', unsafe_allow_html=True)
-
                     if guardar_j:
-                                                # when clicked, same behavior as earlier single guardar
-                                                try:
-                                                        payloads = []
-                                                        for p in palpites_submetidos:
-                                                                jid = p["jogo_id"]
-                                                                payloads.append({
-                                                                        "jogo_id": jid,
-                                                                        "golos_casa": int(st.session_state.get(f"golos_casa_{jid}", 0)),
-                                                                        "golos_fora": int(st.session_state.get(f"golos_fora_{jid}", 0)),
-                                                                })
-                                                        guardar_palpites_em_lote(st.session_state.user_id, payloads)
-                                                        st.success(f"{len(payloads)} prediction(s) saved successfully.")
-                                                        st.rerun()
-                                                except Exception as exc:
-                                                        st.error(f"Error saving predictions: {exc}")
+                        try:
+                            payloads = []
+                            for p in palpites_submetidos:
+                                jid = p["jogo_id"]
+                                payloads.append({
+                                    "jogo_id": jid,
+                                    "golos_casa": int(st.session_state.get(f"golos_casa_{jid}", 0)),
+                                    "golos_fora": int(st.session_state.get(f"golos_fora_{jid}", 0)),
+                                })
+                            guardar_palpites_em_lote(st.session_state.user_id, payloads)
+                            st.success(f"{len(payloads)} prediction(s) saved successfully.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Error saving predictions: {exc}")
 
-                                        # Custom JS removed; relying on CSS overrides for button styling
+                    # Custom JS removed; relying on CSS overrides for button styling
 
 
 def exibir_jogos() -> None:
