@@ -618,6 +618,32 @@ def selecionar_pagina() -> str:
     """Show a sidebar selector and return the chosen page."""
     with st.sidebar:
         st.header("Navigation")
+        # If we have a user_id but no user_email in session, attempt to fetch the email from Supabase
+        if not st.session_state.get("user_email") and st.session_state.get("user_id"):
+            try:
+                client = get_supabase_client()
+                uid = st.session_state.get("user_id")
+                fetched_email = None
+                # Try a few variants of the client auth API to be compatible with supabase-py versions
+                try:
+                    user_obj = client.auth.admin.get_user_by_id(uid)  # newer API
+                    fetched_email = getattr(user_obj, "email", None) or (user_obj.user.email if getattr(user_obj, 'user', None) else None)
+                except Exception:
+                    try:
+                        user_obj = client.auth.api.get_user_by_id(uid)  # older API
+                        fetched_email = user_obj.get("email") if isinstance(user_obj, dict) else None
+                    except Exception:
+                        try:
+                            user_obj = client.auth.get_user(uid)
+                            fetched_email = getattr(user_obj, "email", None) or (user_obj.user.email if getattr(user_obj, 'user', None) else None)
+                        except Exception:
+                            fetched_email = None
+
+                if fetched_email:
+                    st.session_state.user_email = fetched_email
+            except Exception:
+                # ignore failures — fallback checks remain
+                pass
         opcoes = [
             "Home",
             "Schedule",
