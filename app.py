@@ -69,10 +69,10 @@ st.markdown(
         }
         .jogo-card {
             background: #ffffff;
-            padding: 0.35rem 0.75rem;
+            padding: 0.28rem 0.75rem;
             border-radius: 10px;
             box-shadow: 0 1px 3px rgba(16,24,40,0.04);
-            margin: 0.1rem 0 0.45rem 0;
+            margin: 0.05rem 0 0.35rem 0;
         }
         .jogo-linha {
             display: flex;
@@ -115,7 +115,7 @@ st.markdown(
         .result-space { height: 16px; }
         input[type="number"] { width: 56px !important; height:40px !important; }
         .sticky-header { position: sticky; top: 0; z-index: 1100; background: white; padding: 0.5rem 0; }
-        .sticky-submit { position: sticky; top: 64px; z-index: 1050; background: white; padding: 0.5rem 0; display:flex; justify-content:center; }
+        .sticky-submit { position: fixed; top: 12px; right: 24px; z-index: 1300; background: transparent; padding: 0.25rem 0; display:flex; justify-content:center; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -709,17 +709,46 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
             chave = j.get("jornada") or j.get("matchday") or j.get("round") or ""
             jogos_por_jornada[str(chave)].append(j)
 
-        # order jornadas: try numeric sort where possible, otherwise keep insertion order
+        # order jornadas with sensible tournament order: numeric matchdays first, then knockout rounds with final last
         def _j_key(k: str):
+            s = str(k).strip()
+            if s == "":
+                return (0, 0, "")
+            # numeric matchdays: keep numeric order
             try:
-                return (0, int(k))
+                return (1, int(s), "")
             except Exception:
-                return (1, k)
+                sl = s.lower()
+                # priority categories (higher second value = later in tournament)
+                if "final" in sl:
+                    return (4, 0, sl)
+                if "semif" in sl or "meia" in sl:
+                    return (3, 0, sl)
+                if "quart" in sl or "quarter" in sl:
+                    return (2, 0, sl)
+                if "round of 16" in sl or "oitav" in sl or "round16" in sl:
+                    return (2, 1, sl)
+                if "round of 32" in sl or "32" in sl:
+                    # place round of 32 after group matchdays
+                    return (1, 1000, sl)
+                if "group" in sl or "grupo" in sl or "matchday" in sl or "jornada" in sl:
+                    return (1, 0, sl)
+                # fallback: keep in middle
+                return (2, 50, sl)
 
         jornadas = sorted(jogos_por_jornada.keys(), key=_j_key)
 
+        # build tab labels including counts (total / with result)
+        tab_labels = []
+        for j in jornadas:
+            rows = jogos_por_jornada[j]
+            total = len(rows)
+            with_result = sum(1 for r in rows if formatar_resultado_real(r) is not None)
+            label = str(j) if str(j) else "All"
+            tab_labels.append(f"{label} ({total}/{with_result})")
+
         # create tabs inside the single form so we keep one Save button
-        tabs = st.tabs([str(j) if str(j) else "All" for j in jornadas])
+        tabs = st.tabs(tab_labels)
         for idx, jlabel in enumerate(jornadas):
             tab = tabs[idx]
             with tab:
@@ -854,13 +883,38 @@ def exibir_jogos() -> None:
             jogos_por_jornada[str(chave)].append(j)
 
         def _j_key(k: str):
+            s = str(k).strip()
+            if s == "":
+                return (0, 0, "")
             try:
-                return (0, int(k))
+                return (1, int(s), "")
             except Exception:
-                return (1, k)
+                sl = s.lower()
+                if "final" in sl:
+                    return (4, 0, sl)
+                if "semif" in sl or "meia" in sl:
+                    return (3, 0, sl)
+                if "quart" in sl or "quarter" in sl:
+                    return (2, 0, sl)
+                if "round of 16" in sl or "oitav" in sl or "round16" in sl:
+                    return (2, 1, sl)
+                if "round of 32" in sl or "32" in sl:
+                    return (1, 1000, sl)
+                if "group" in sl or "grupo" in sl or "matchday" in sl or "jornada" in sl:
+                    return (1, 0, sl)
+                return (2, 50, sl)
 
         jornadas = sorted(jogos_por_jornada.keys(), key=_j_key)
-        tabs = st.tabs([str(j) if str(j) else "All" for j in jornadas])
+        # build labels with counts
+        tab_labels = []
+        for j in jornadas:
+            rows = jogos_por_jornada[j]
+            total = len(rows)
+            with_result = sum(1 for r in rows if formatar_resultado_real(r) is not None)
+            label = str(j) if str(j) else "All"
+            tab_labels.append(f"{label} ({total}/{with_result})")
+
+        tabs = st.tabs(tab_labels)
         for idx, jlabel in enumerate(jornadas):
             with tabs[idx]:
                 for jogo in jogos_por_jornada[jlabel]:
