@@ -36,7 +36,7 @@ JOGADORES_ELITE = [
     "Romelu Lukaku",
     "Lamine Yamal",
     "Cristiano Ronaldo",
-    "Rodrygo",
+    "Mikel Oyarzabal",
     "Pedri",
     "Jamal Musiala",
     "Neymar",

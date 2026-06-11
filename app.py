@@ -561,19 +561,22 @@ def renderizar_ranking() -> None:
 
     # Make a visually pleasant styled table: center, highlight top 3
     def _highlight_top(row):
-        # row.name is 0-based index after reset
         if row.name < 3:
-            return ["background-color: #fff8e1; font-weight: bold; text-align: center;" for _ in row]
-        return ["text-align: center;" for _ in row]
+            return ["background-color: #fff8e1; font-weight: bold;" for _ in row]
+        return ["" for _ in row]
 
     styled = (
         df.style
         .apply(_highlight_top, axis=1)
-        .set_properties(**{"text-align": "center"})
+        .hide_index()
+        .set_properties(**{"text-align": "center", "font-size": "14px", "padding": "6px"})
+        .set_properties(subset=["Position", "Points"], **{"width": "70px", "max-width": "70px"})
+        .set_properties(subset=["Name"], **{"text-align": "left"})
         .format({"Points": "{:.0f}"})
     )
 
-    st.dataframe(styled, use_container_width=True)
+    # Show dataframe with more height so it's not clipped; rows are thinner due to smaller padding
+    st.dataframe(styled, use_container_width=True, height=420)
 
     # Expanders com detalhe por utilizador (apenas jogos finalizados aparecem no detalhe)
     for usuario in ranking:
