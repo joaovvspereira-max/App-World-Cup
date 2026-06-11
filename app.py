@@ -63,8 +63,9 @@ st.markdown(
         }
         .jogo-meta {
             color: #5C6B7A;
-            font-size: 0.875rem;
-            margin-bottom: 0.5rem;
+            font-size: 0.95rem;
+            margin-bottom: 0.75rem;
+            font-weight: 600;
         }
         .jogo-card {
             background: #ffffff;
@@ -91,7 +92,9 @@ st.markdown(
             font-weight: 700;
             color: #5C6B7A;
         }
-        img.flag-icon { border-radius: 4px; vertical-align: middle; }
+        img.flag-icon { border-radius: 10px; vertical-align: middle; border: 1px solid #E6E9EE; background: white; padding: 2px; object-fit: cover; }
+        .flag-wrapper { display:flex; align-items:center; justify-content:center; width:56px; }
+        .team-block { display:flex; align-items:center; gap:0.75rem; justify-content:center; }
 
         /* Estilo global para inputs numéricos de golos */
         input[type="number"] {
@@ -104,9 +107,10 @@ st.markdown(
             border: 1px solid #E6E9EE !important;
             width: 64px !important;
         }
-        .team-name { font-size: 1.25rem; font-weight:700; }
-        .jogo-card { text-align: center; }
+        .team-name { font-size: 1.15rem; font-weight:700; }
+        .jogo-card { text-align: center; padding: 0.9rem 1rem; }
         .jogo-equipa { justify-content: center; }
+        .result-space { height: 52px; }
         .sticky-header { position: sticky; top: 0; z-index: 1100; background: white; padding: 0.5rem 0; }
         .sticky-submit { position: sticky; top: 64px; z-index: 1050; background: white; padding: 0.5rem 0; display:flex; justify-content:center; }
     </style>
@@ -375,11 +379,20 @@ def formatar_data_jogo(valor: Any) -> str | None:
     """Formata a data do jogo para exibição."""
     if not valor:
         return None
-    if isinstance(valor, date):
-        return valor.strftime("%d/%m/%Y")
+    # If it's a date or datetime-like include time when available
     try:
-        return datetime.fromisoformat(str(valor).replace("Z", "+00:00")).strftime("%d/%m/%Y")
-    except ValueError:
+        s = str(valor)
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        # if time is midnight and original string had no time, show only date
+        if dt.time().hour == 0 and dt.time().minute == 0 and ("T" not in s and "+" not in s):
+            return dt.strftime("%d/%m/%Y")
+        return dt.strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        try:
+            if isinstance(valor, date):
+                return valor.strftime("%d/%m/%Y")
+        except Exception:
+            pass
         return str(valor)
 
 
@@ -745,18 +758,20 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
             col_left, col_mid, col_sep, col_mid2, col_right = st.columns([2.5, 1, 0.4, 1, 2.5])
 
             with col_left:
-                # home team name + input adjacent
-                name_col, input_col = st.columns([3, 1])
+                # home: flag | name | input
+                flag_col, name_col, input_col = st.columns([0.6, 3.4, 1])
                 equipe_casa = jogo.get("equipa_casa", "—")
                 codigo_casa = flag_map.get(equipe_casa, "")
-                img_casa = (
-                    f'<img class="flag-icon" src="https://flagcdn.com/48x36/{codigo_casa}.png" width="48" height="36"/>'
-                    if codigo_casa
-                    else ""
-                )
+                with flag_col:
+                    img_casa = (
+                        f'<div class="flag-wrapper"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_casa}.png" width="64" height="48"/></div>'
+                        if codigo_casa
+                        else '<div class="flag-wrapper"></div>'
+                    )
+                    st.markdown(img_casa, unsafe_allow_html=True)
                 with name_col:
                     st.markdown(
-                        f'<p class="jogo-equipa">{img_casa} <span class="team-name">{equipe_casa}</span></p>',
+                        f'<div class="team-block"><span class="team-name">{equipe_casa}</span></div>',
                         unsafe_allow_html=True,
                     )
                 with input_col:
@@ -773,15 +788,10 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                 st.markdown('<p class="jogo-separador">—</p>', unsafe_allow_html=True)
 
             with col_right:
-                # away input + name adjacent (input first so name appears next to it)
-                input_col2, name_col2 = st.columns([1, 3])
+                # away: input | name | flag
+                input_col2, name_col2, flag_col2 = st.columns([1, 3.4, 0.6])
                 equipe_fora = jogo.get("equipa_fora", "—")
                 codigo_fora = flag_map.get(equipe_fora, "")
-                img_fora = (
-                    f'<img class="flag-icon" src="https://flagcdn.com/48x36/{codigo_fora}.png" width="48" height="36"/>'
-                    if codigo_fora
-                    else ""
-                )
                 with input_col2:
                     golos_fora = st.number_input(
                         "Away goals",
@@ -793,9 +803,16 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     )
                 with name_col2:
                     st.markdown(
-                        f'<p class="jogo-equipa"><span class="team-name">{equipe_fora}</span> {img_fora}</p>',
+                        f'<div class="team-block"><span class="team-name">{equipe_fora}</span></div>',
                         unsafe_allow_html=True,
                     )
+                with flag_col2:
+                    img_fora = (
+                        f'<div class="flag-wrapper"><img class="flag-icon" src="https://flagcdn.com/64x48/{codigo_fora}.png" width="64" height="48"/></div>'
+                        if codigo_fora
+                        else '<div class="flag-wrapper"></div>'
+                    )
+                    st.markdown(img_fora, unsafe_allow_html=True)
 
             palpites_submetidos.append(
                 {
@@ -804,6 +821,8 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     "golos_fora": st.session_state.get(f"golos_fora_{jogo_id}", int(palpite.get("golos_fora") or 0)),
                 }
             )
+            # reserved space for showing the real result after the match
+            st.markdown('<div class="result-space"></div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
             st.divider()
 
