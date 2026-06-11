@@ -194,9 +194,56 @@ def guardar_palpites_em_lote(
         }
         for palpite in palpites
     ]
-    response = (
+    # Safer upsert: don't rely on DB having a unique constraint for (utilizador_id, jogo_id).
+    # Instead, fetch existing rows for this user and update them individually; insert the rest.
+    jogo_ids = [p["jogo_id"] for p in palpites]
+    existing_resp = (
         client.table("palpites")
-        .upsert(payloads, on_conflict="utilizador_id,jogo_id")
+        .select("id, jogo_id")
+        .eq("utilizador_id", utilizador_id)
+        .in_("jogo_id", jogo_ids)
         .execute()
     )
-    return response.data or payloads
+    existing = {row["jogo_id"]: row for row in (existing_resp.data or [])}
+
+    to_update = []
+    to_insert = []
+    for p in payloads:
+        jid = p["jogo_id"]
+        if jid in existing:
+            # update existing row
+            to_update.append((existing[jid]["id"], p))
+        else:
+            to_insert.append(p)
+
+    results: list[dict[str, Any]] = []
+    # perform updates
+    for row_id, p in to_update:
+        try:
+            resp = client.table("palpites").update({
+                "golos_casa_palpite": p["golos_casa_palpite"],
+                "golos_fora_palpite": p["golos_fora_palpite"],
+            }).eq("id", row_id).execute()
+            if resp.data:
+                results.extend(resp.data)
+        except Exception:
+            # best-effort: skip failures and continue
+            pass
+
+    # perform bulk insert for new rows
+    if to_insert:
+        try:
+            resp = client.table("palpites").insert(to_insert).execute()
+            if resp.data:
+                results.extend(resp.data)
+        except Exception:
+            # fallback: if bulk insert fails, attempt single inserts
+            for p in to_insert:
+                try:
+                    r = client.table("palpites").insert(p).execute()
+                    if r.data:
+                        results.extend(r.data)
+                except Exception:
+                    pass
+
+    return results
