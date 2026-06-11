@@ -69,10 +69,10 @@ st.markdown(
         }
         .jogo-card {
             background: #ffffff;
-            padding: 0.28rem 0.75rem;
+            padding: 0.18rem 0.75rem;
             border-radius: 10px;
             box-shadow: 0 1px 3px rgba(16,24,40,0.04);
-            margin: 0.05rem 0 0.35rem 0;
+            margin: 0.02rem 0 0.25rem 0;
         }
         .jogo-linha {
             display: flex;
@@ -112,10 +112,12 @@ st.markdown(
         .team-name { font-size: 1.25rem; font-weight:800; }
         .jogo-card { text-align: center; padding: 0.9rem 1rem; }
         .jogo-equipa { justify-content: center; }
-        .result-space { height: 16px; }
+        .result-space { height: 8px; }
         input[type="number"] { width: 56px !important; height:40px !important; }
         .sticky-header { position: sticky; top: 0; z-index: 1100; background: white; padding: 0.5rem 0; }
-        .sticky-submit { position: fixed; top: 12px; right: 24px; z-index: 1300; background: transparent; padding: 0.25rem 0; display:flex; justify-content:center; }
+        .sticky-submit { display: none; }
+        .save-card { width:100%; display:block; margin-top:0.5rem; }
+        .save-card .stButton>button { background-color:#0b63d6; color:white; font-weight:800; font-size:18px; height:56px; border-radius:12px; width:100%; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -139,10 +141,11 @@ DEFAULT_FLAG_MAP = {
     "Czechia": "cz",
     "Colombia": "co",
     "Curaçao": "cw",
+    "Croatia": "hr",
     "Cape Verde": "cv",
     "South Korea": "kr",
     "Ivory Coast": "ci",
-    "DR Congo": "cd",
+    "Congo DR": "cd",
     "Egypt": "eg",
     "Ecuador": "ec",
     "Scotland": "gb",
@@ -697,10 +700,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
 
     palpites_submetidos: list[dict[str, int]] = []
     with st.form("form_palpites"):
-        # sticky save button at top
-        st.markdown('<div class="sticky-submit">', unsafe_allow_html=True)
-        guardar = st.form_submit_button("Save Predictions", use_container_width=False)
-        st.markdown('</div>', unsafe_allow_html=True)
+        # removed top sticky save; per-tab save buttons will appear after each jornada's matches
         # group matches by the 'jornada' column (matchday)
         from collections import defaultdict
 
@@ -724,6 +724,8 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     return (4, 0, sl)
                 if "semif" in sl or "meia" in sl:
                     return (3, 0, sl)
+                if "third" in sl or "3rd" in sl or "third place" in sl or "play-off" in sl or "playoff" in sl:
+                    return (3, 5, sl)
                 if "quart" in sl or "quarter" in sl:
                     return (2, 0, sl)
                 if "round of 16" in sl or "oitav" in sl or "round16" in sl:
@@ -738,20 +740,16 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
 
         jornadas = sorted(jogos_por_jornada.keys(), key=_j_key)
 
-        # build tab labels including counts (total / with result)
-        tab_labels = []
-        for j in jornadas:
-            rows = jogos_por_jornada[j]
-            total = len(rows)
-            with_result = sum(1 for r in rows if formatar_resultado_real(r) is not None)
-            label = str(j) if str(j) else "All"
-            tab_labels.append(f"{label} ({total}/{with_result})")
-
-        # create tabs inside the single form so we keep one Save button
-        tabs = st.tabs(tab_labels)
+        # create tabs inside the single form; each tab will include its own Save button at the bottom
+        tabs = st.tabs([str(j) if str(j) else "All" for j in jornadas])
         for idx, jlabel in enumerate(jornadas):
             tab = tabs[idx]
             with tab:
+                # show counts below tabs for this jornada
+                rows = jogos_por_jornada[jlabel]
+                total = len(rows)
+                with_result = sum(1 for r in rows if formatar_resultado_real(r) is not None)
+                st.markdown(f'<div style="color:#6B7280; margin-bottom:0.25rem;">Matches: <strong>{total}</strong> · Completed: <strong>{with_result}</strong></div>', unsafe_allow_html=True)
                 for jogo in jogos_por_jornada[jlabel]:
                     jogo_id = jogo["id"]
                     palpite = palpites_existentes.get(jogo_id, {})
@@ -829,26 +827,26 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     st.markdown('<div class="result-space"></div>', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
                     st.divider()
-
-    if guardar:
-        try:
-            # Recolecta valores actuais dos inputs (em st.session_state)
-            payloads = []
-            for p in palpites_submetidos:
-                jid = p["jogo_id"]
-                payloads.append(
-                    {
-                        "jogo_id": jid,
-                        "golos_casa": int(st.session_state.get(f"golos_casa_{jid}", 0)),
-                        "golos_fora": int(st.session_state.get(f"golos_fora_{jid}", 0)),
-                    }
-                )
-
-            guardar_palpites_em_lote(st.session_state.user_id, payloads)
-            st.success(f"{len(payloads)} prediction(s) saved successfully.")
-            st.rerun()
-        except Exception as exc:
-            st.error(f"Error saving predictions: {exc}")
+                # Save button for this jornada (submits the parent form)
+                st.markdown('<div class="save-card">', unsafe_allow_html=True)
+                guardar_j = st.form_submit_button(f"💾 Save Predictions", key=f"save_{jlabel}", use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+                if guardar_j:
+                    # when clicked, same behavior as earlier single guardar
+                    try:
+                        payloads = []
+                        for p in palpites_submetidos:
+                            jid = p["jogo_id"]
+                            payloads.append({
+                                "jogo_id": jid,
+                                "golos_casa": int(st.session_state.get(f"golos_casa_{jid}", 0)),
+                                "golos_fora": int(st.session_state.get(f"golos_fora_{jid}", 0)),
+                            })
+                        guardar_palpites_em_lote(st.session_state.user_id, payloads)
+                        st.success(f"{len(payloads)} prediction(s) saved successfully.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Error saving predictions: {exc}")
 
 
 def exibir_jogos() -> None:
@@ -858,13 +856,6 @@ def exibir_jogos() -> None:
     except Exception as exc:
         st.error(f"Could not load matches: {exc}")
         return
-
-    col1, col2 = st.columns(2)
-    col1.metric("Total de jogos", len(jogos))
-    col2.metric(
-        "Jogos com resultado",
-        sum(1 for jogo in jogos if formatar_resultado_real(jogo) is not None),
-    )
 
     st.subheader("Match Schedule")
 
