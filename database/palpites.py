@@ -232,3 +232,73 @@ def guardar_palpites_em_lote(
             pass
 
     return results
+
+
+def get_palpites_por_jogo() -> dict[int, list[dict]]:
+    """Returns predictions grouped by jogo_id, each entry includes user_id, nome,
+    palpite (formatted "X - Y") and pontos (None if match has no real result yet).
+
+    Used by the match schedule to display other users' predictions and the
+    points they scored for each finished match.
+    """
+    client = get_supabase_client()
+
+    # Load all predictions
+    palpites_resp = client.table("palpites").select(
+        "utilizador_id, jogo_id, golos_casa_palpite, golos_fora_palpite"
+    ).execute()
+    palpites = palpites_resp.data or []
+
+    # Load matches (we only need IDs and real results here)
+    jogos_resp = client.table("jogos").select(
+        "id, golos_casa_real, golos_fora_real"
+    ).execute()
+    jogos = {row["id"]: row for row in (jogos_resp.data or [])}
+
+    # Load profiles to map names
+    perfis_resp = client.table("perfis").select("id, username").execute()
+    perfis = {row["id"]: row.get("username") or row["id"] for row in (perfis_resp.data or [])}
+
+    result: dict[int, list[dict]] = {}
+    for p in palpites:
+        jogo_id = p.get("jogo_id")
+        uid = p.get("utilizador_id")
+        if jogo_id is None or uid is None:
+            continue
+
+        try:
+            p_casa = int(p.get("golos_casa_palpite"))
+            p_fora = int(p.get("golos_fora_palpite"))
+        except Exception:
+            continue
+
+        jogo = jogos.get(jogo_id) or {}
+        r_casa = jogo.get("golos_casa_real")
+        r_fora = jogo.get("golos_fora_real")
+
+        if r_casa is not None and r_fora is not None:
+            try:
+                if jogo_id in JOGOS_EXCLUIDOS_RANKING:
+                    pontos = 0
+                else:
+                    pontos = calcular_pontos_jogo(p_casa, p_fora, int(r_casa), int(r_fora))
+            except Exception:
+                pontos = 0
+        else:
+            pontos = None
+
+        result.setdefault(jogo_id, []).append({
+            "user_id": uid,
+            "nome": perfis.get(uid, uid),
+            "palpite": f"{p_casa} - {p_fora}",
+            "pontos": pontos,
+        })
+
+    # Sort each list by points descending (None goes last)
+    for jogo_id in result:
+        result[jogo_id] = sorted(
+            result[jogo_id],
+            key=lambda x: (x.get("pontos") is None, -(x.get("pontos") or 0)),
+        )
+
+    return result

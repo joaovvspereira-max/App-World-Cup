@@ -18,6 +18,7 @@ import unicodedata
 import difflib
 from database.palpites import (
     get_palpites_utilizador,
+    get_palpites_por_jogo,
     guardar_palpites_em_lote,
     submeter_palpite,
     get_ranking,
@@ -976,6 +977,11 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
     except Exception as exc:
         st.error(f"Could not load your predictions: {exc}")
         return
+    # Load all users' predictions grouped by match (for "See others' predictions" dropdown)
+    try:
+        palpites_por_jogo = get_palpites_por_jogo()
+    except Exception:
+        palpites_por_jogo = {}
     # build dynamic flag map from DB
     flag_map = build_flag_map_from_db()
 
@@ -1175,6 +1181,22 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
 
                         # show centered English text with larger font
                         st.markdown(f'<p class="resultado-real">Actual result: {int(r_casa)}-{int(r_fora)}<br>+{pontos_palpite} points</p>', unsafe_allow_html=True)
+
+                        # Dropdown showing other users' predictions for this match
+                        outras = [
+                            p for p in palpites_por_jogo.get(jogo_id, [])
+                            if p.get("user_id") != st.session_state.user_id
+                        ]
+                        if outras:
+                            with st.expander(f"👥 See others' predictions ({len(outras)})"):
+                                df_outras = pd.DataFrame(outras)
+                                df_outras = df_outras[["nome", "palpite", "pontos"]]
+                                df_outras = df_outras.rename(columns={
+                                    "nome": "Name",
+                                    "palpite": "Prediction",
+                                    "pontos": "Points",
+                                })
+                                st.table(df_outras)
                     # do not render extra spacer when result exists
                     st.markdown('</div>', unsafe_allow_html=True)
 
