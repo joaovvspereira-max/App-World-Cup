@@ -534,10 +534,13 @@ def renderizar_previsoes_macro() -> None:
                 vencedor_mundial=vencedor,
                 melhor_marcador=marcador,
             )
-            st.success("Special predictions saved successfully.")
+            success_placeholder = st.empty()
+            success_placeholder.success("✅ Special predictions saved successfully!")
+            time.sleep(3)
+            success_placeholder.empty()
             st.rerun()
         except Exception as exc:
-                st.error(f"Error saving special predictions: {exc}")
+            st.error(f"❌ Error saving special predictions: {exc}")
 
 
 def renderizar_ranking() -> None:
@@ -554,51 +557,114 @@ def renderizar_ranking() -> None:
         st.info("Ainda não existem palpites com resultados para compilar o ranking.")
         return
 
-    # DataFrame para a tabela de liderança
-    df = pd.DataFrame(
-        [{"Name": r.get("nome"), "Points": r.get("pontos_totais", 0)} for r in ranking]
-    )
-    df = df.sort_values(by="Points", ascending=False).reset_index(drop=True)
-    # Position column starting at 1
-    df.insert(0, "Position", range(1, len(df) + 1))
-
-    # Render an HTML table so we can hide the DataFrame index reliably across pandas versions
-    df_html = df.to_html(index=False, classes="ranking-table", border=0, justify="left", escape=False)
+    MEDAL_STYLES = {
+        1: {"bg": "#FFF9E6", "badge_bg": "#FFD700", "badge_color": "#7A5800", "icon": "🥇"},
+        2: {"bg": "#F5F5F5", "badge_bg": "#C0C0C0", "badge_color": "#4A4A4A", "icon": "🥈"},
+        3: {"bg": "#FDF1E7", "badge_bg": "#CD7F32", "badge_color": "#FFFFFF", "icon": "🥉"},
+    }
 
     css = """
     <style>
-    .ranking-table { width: 100%; border-collapse: collapse; font-size: 15px; }
-    .ranking-table th { text-align: left; padding: 6px 10px; color: #6B7280; font-weight: 600; background: #fbfbfb; }
-    .ranking-table td { padding: 6px 10px; border-top: 1px solid #eee; vertical-align: middle; }
-    .ranking-table td:nth-child(1), .ranking-table th:nth-child(1) { width: 70px; max-width:70px; text-align: center; }
-    .ranking-table td:nth-child(3), .ranking-table th:nth-child(3) { width: 70px; max-width:70px; text-align: center; }
-    .ranking-table td:nth-child(2) { text-align: left; }
-    .ranking-table tbody tr:nth-child(-n+3) { background-color: #fff8e1; font-weight: 700; }
+    @import url('https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700;800&display=swap');
+    .ranking-wrap { font-family: "Source Sans Pro", "Source Sans 3", sans-serif; width: 100%; }
+    .ranking-table { width: 100%; border-collapse: separate; border-spacing: 0 6px; font-size: 15px; }
+    .ranking-table th {
+        text-align: left; padding: 4px 14px 10px 14px;
+        color: #6B7280; font-weight: 700; font-size: 12px;
+        text-transform: uppercase; letter-spacing: 0.07em;
+        border-bottom: 2px solid #E6E9EE;
+    }
+    .ranking-table th:first-child { text-align: center; width: 60px; }
+    .ranking-table th:last-child  { text-align: right; width: 80px; }
+    .ranking-table td { padding: 12px 14px; vertical-align: middle; }
+    .ranking-table td:first-child { text-align: center; width: 60px; border-radius: 10px 0 0 10px; }
+    .ranking-table td:last-child  { text-align: right; width: 80px; border-radius: 0 10px 10px 0; }
+    .rank-badge {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 32px; height: 32px; border-radius: 50%;
+        font-weight: 800; font-size: 14px;
+    }
+    .rank-name  { font-weight: 700; font-size: 16px; color: #1A1A2E; }
+    .rank-pts   { font-weight: 800; font-size: 17px; color: #1A1A2E; }
+    .rank-pts-label { font-size: 11px; color: #6B7280; font-weight: 400; margin-left: 2px; }
+    .row-gold   { background: #FFF9E6; }
+    .row-silver { background: #F5F5F5; }
+    .row-bronze { background: #FDF1E7; }
+    .row-normal { background: #FAFAFA; }
+    .row-normal:hover, .row-gold:hover, .row-silver:hover, .row-bronze:hover { filter: brightness(0.97); }
     </style>
     """
 
-    # Render the HTML table using Streamlit components to ensure the HTML is interpreted
+    # Build rows HTML manually for full control over per-row styling
+    rows_html = ""
+    for pos, usuario in enumerate(ranking, start=1):
+        nome = usuario.get("nome", "—")
+        pontos = usuario.get("pontos_totais", 0)
+        bonus = usuario.get("bonus_aplicado", 0)
+        bonus_str = f' <span style="font-size:12px;color:#6B7280;font-weight:400;">(+{bonus} bonus)</span>' if bonus else ""
+
+        m = MEDAL_STYLES.get(pos)
+        if m:
+            row_class = {1: "row-gold", 2: "row-silver", 3: "row-bronze"}[pos]
+            badge = (
+                f'<span class="rank-badge" style="background:{m["badge_bg"]};color:{m["badge_color"]};">'
+                f'{m["icon"]}</span>'
+            )
+        else:
+            row_class = "row-normal"
+            badge = (
+                f'<span class="rank-badge" style="background:#E6E9EE;color:#6B7280;">'
+                f'{pos}</span>'
+            )
+
+        rows_html += (
+            f'<tr class="{row_class}">'
+            f'  <td>{badge}</td>'
+            f'  <td><span class="rank-name">{nome}</span>{bonus_str}</td>'
+            f'  <td><span class="rank-pts">{pontos}</span><span class="rank-pts-label">pts</span></td>'
+            f'</tr>'
+        )
+
+    table_html = f"""
+    <div class="ranking-wrap">
+      {css}
+      <table class="ranking-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Name</th>
+            <th>Points</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows_html}
+        </tbody>
+      </table>
+    </div>
+    """
+
     try:
-        # height: base 200px plus ~40px per row
-        table_height = max(200, 40 * len(df) + 80)
-        st.components.v1.html(css + df_html, height=table_height, scrolling=True)
+        table_height = max(200, 58 * len(ranking) + 80)
+        st.components.v1.html(table_html, height=table_height, scrolling=False)
     except Exception:
-        # Fallback to markdown if components aren't available in this environment
-        st.markdown(css + df_html, unsafe_allow_html=True)
+        st.markdown(table_html, unsafe_allow_html=True)
+
+    st.write("")
 
     # Expanders com detalhe por utilizador (apenas jogos finalizados aparecem no detalhe)
-    for usuario in ranking:
+    for pos, usuario in enumerate(ranking, start=1):
         nome = usuario.get("nome")
         pontos = usuario.get("pontos_totais", 0)
         detalhes = usuario.get("palpites", [])
         bonus = usuario.get("bonus_aplicado", 0)
+        icon = MEDAL_STYLES[pos]["icon"] if pos in MEDAL_STYLES else f"{pos}."
+        label = f"{icon} {nome} — {pontos} pts{' (+' + str(bonus) + ' bonus)' if bonus else ''}"
 
-        with st.expander(f"{nome} — {pontos} pts{' (+' + str(bonus) + ' bonus)' if bonus else ''}"):
+        with st.expander(label):
             if not detalhes:
                 st.write("No finalized predictions.")
                 continue
             detalhes_df = pd.DataFrame(detalhes)
-            # Place match description as the first column
             detalhes_df["Match"] = detalhes_df.apply(lambda r: f"{r['equipa_casa']} vs {r['equipa_fora']}", axis=1)
             detalhes_df = detalhes_df[["Match", "palpite", "resultado_real", "pontos"]]
             detalhes_df = detalhes_df.rename(columns={"palpite": "Prediction", "resultado_real": "Actual Result", "pontos": "Points"})
@@ -615,7 +681,7 @@ def renderizar_auth() -> None:
 
         with tab_login:
             with st.form("form_login", clear_on_submit=False):
-                email = st.text_input("Email", placeholder="tu@email.com")
+                email = st.text_input("Email", placeholder="you@email.com")
                 password = st.text_input("Password", type="password")
                 login_submetido = st.form_submit_button("Sign In", use_container_width=True)
 
@@ -634,8 +700,8 @@ def renderizar_auth() -> None:
 
         with tab_registo:
             with st.form("form_registo", clear_on_submit=True):
-                nome = st.text_input("Nome", placeholder="O teu nome")
-                email = st.text_input("Email", placeholder="tu@email.com")
+                nome = st.text_input("Nome", placeholder="Your Name")
+                email = st.text_input("Email", placeholder="you@email.com")
                 password = st.text_input("Password", type="password")
                 registo_submetido = st.form_submit_button("Create account", use_container_width=True)
 
@@ -996,6 +1062,18 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     jogo_id = jogo["id"]
                     palpite = palpites_existentes.get(jogo_id, {})
 
+                    # disable prediction input if match has already started
+                    now = datetime.datetime.now().date()
+                    match_date = jogo.get("data")
+                    match_time = jogo.get("hora_jogo")
+                    if match_date and match_time:
+                        match_start = datetime.datetime.combine(match_date, match_time)
+                        disabled = datetime.datetime.now() >= match_start
+                    elif match_date:
+                        disabled = now >= match_date
+                    else:
+                        disabled = False
+
                     # visual wrapper (card)
                     st.markdown(f'<div class="jogo-card">', unsafe_allow_html=True)
                     st.markdown(f'<p class="jogo-meta">{formatar_info_jogo(jogo)}</p>', unsafe_allow_html=True)
@@ -1020,8 +1098,6 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                         with name_sub:
                             st.markdown(f'<div style="text-align:right" class="team-block"><span class="team-name">{equipe_casa}</span></div>', unsafe_allow_html=True)
                         with input_sub:
-                            # disable prediction input if real result exists
-                            disabled = jogo.get("golos_casa_real") is not None and jogo.get("golos_fora_real") is not None
                             golos_casa = st.number_input(
                                     "Home goals",
                                     min_value=0,
@@ -1041,7 +1117,6 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     with col_name_right:
                         input_sub2, name_sub2 = st.columns([1, 3])
                         with input_sub2:
-                            disabled = jogo.get("golos_casa_real") is not None and jogo.get("golos_fora_real") is not None
                             golos_fora = st.number_input(
                                 "Away goals",
                                 min_value=0,
@@ -1112,24 +1187,16 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                                 "golos_fora": int(st.session_state.get(f"golos_fora_{jid}", 0)),
                             })
                         results = guardar_palpites_em_lote(st.session_state.user_id, payloads)
-                        # Only show success when the DB returned inserted/updated rows
                         if results:
-                            st.success(f"{len(results)} prediction(s) saved successfully.")
+                            success_placeholder = st.empty()
+                            success_placeholder.success(f"✅ {len(results)} prediction(s) saved successfully!")
+                            time.sleep(3)
+                            success_placeholder.empty()
                             st.rerun()
                         else:
-                            # Provide diagnostics to help debug why nothing was saved
-                            st.warning(
-                                "No changes were made to your predictions. Possible causes: not signed in, DB RLS/policies blocking writes, or predictions identical to existing values."
-                            )
-                            uid = st.session_state.get("user_id") if isinstance(st.session_state, dict) else getattr(st.session_state, "user_id", None)
-                            st.markdown(f"**Debug:** user id = {uid} | payloads = {len(payloads)}")
-                            # show a short preview of the payloads
-                            try:
-                                st.json(payloads[:10])
-                            except Exception:
-                                st.write(payloads[:10])
+                            st.error("❌ Could not save predictions. Please try again or sign out and back in.")
                     except Exception as exc:
-                        st.error(f"Error saving predictions: {exc}")
+                        st.error(f"❌ Error saving predictions: {exc}")
 
 
 def exibir_jogos() -> None:
