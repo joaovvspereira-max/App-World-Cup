@@ -4,6 +4,9 @@ from typing import Any
 
 from database.supabase_client import get_supabase_client
 
+# Matches excluded from the ranking — points are always zero for these game IDs.
+JOGOS_EXCLUIDOS_RANKING: frozenset[int] = frozenset({1, 2})
+
 
 def calcular_pontos_jogo(p_casa: int, p_fora: int, r_casa: int | None, r_fora: int | None) -> int:
     """Calcula os pontos de um único jogo segundo as regras fornecidas.
@@ -106,7 +109,8 @@ def get_ranking() -> list[dict]:
             # se não forem inteiros, ignora
             continue
 
-        pontos = calcular_pontos_jogo(p_casa, p_fora, r_casa, r_fora)
+        # Hardcoded exclusion: excluded matches always count as zero points
+        pontos = 0 if jogo_id in JOGOS_EXCLUIDOS_RANKING else calcular_pontos_jogo(p_casa, p_fora, r_casa, r_fora)
 
         usuario = usuarios.setdefault(uid, {"user_id": uid, "nome": perfis.get(uid, uid), "pontos_totais": 0, "palpites": []})
 
