@@ -997,15 +997,24 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     palpite = palpites_existentes.get(jogo_id, {})
 
                     # disable prediction input if match has already started
-                    now = datetime.now().date()
+                    now = datetime.now()
                     match_date = jogo.get("data")
                     match_time = jogo.get("hora_jogo")
-                    if match_date and match_time:
-                        match_start = datetime.combine(match_date, match_time)
-                        disabled = datetime.now() >= match_start
-                    elif match_date:
-                        disabled = now >= match_date
-                    else:
+                    try:
+                        if isinstance(match_date, str):
+                            match_date = date.fromisoformat(match_date)
+                        if isinstance(match_time, str):
+                            from datetime import time as dt_time
+                            parts = match_time.split(":")
+                            match_time = dt_time(int(parts[0]), int(parts[1]))
+                        if match_date and match_time:
+                            match_start = datetime.combine(match_date, match_time)
+                            disabled = now >= match_start
+                        elif match_date:
+                            disabled = now.date() >= match_date
+                        else:
+                            disabled = False
+                    except Exception:
                         disabled = False
 
                     # visual wrapper (card)
