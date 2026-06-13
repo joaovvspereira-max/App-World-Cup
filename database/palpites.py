@@ -185,51 +185,87 @@ def guardar_palpites_em_lote(
     utilizador_id: str,
     palpites: list[dict[str, int]],
 ) -> list[dict[str, Any]]:
-    """Faz upsert em lote na tabela 'palpites'."""
+    """Faz upsert em lote na tabela 'palpites'.
+
+    Uses Supabase upsert with on_conflict on (utilizador_id, jogo_id) to ensure
+    that an existing prediction for the same user + match is UPDATED instead of
+    creating a duplicate row. This relies on a UNIQUE constraint on
+    (utilizador_id, jogo_id) at the database level.
+    """
     if not palpites:
         return []
     client = get_supabase_client()
 
-    results: list[dict[str, Any]] = []
-    # iterate each prediction and attempt an update first, then insert if no row was updated
+    # Build the full payload list for a single batched upsert
+    payloads: list[dict[str, Any]] = []
     for palpite in palpites:
         jid = palpite.get("jogo_id")
         if jid is None:
             continue
-        payload = {
+        payloads.append({
             "utilizador_id": utilizador_id,
             "jogo_id": jid,
             "golos_casa_palpite": palpite.get("golos_casa", 0),
             "golos_fora_palpite": palpite.get("golos_fora", 0),
-        }
+        })
 
-        try:
-            # try update by user + jogo
-            upd = (
-                client.table("palpites")
-                .update({
-                    "golos_casa_palpite": payload["golos_casa_palpite"],
-                    "golos_fora_palpite": payload["golos_fora_palpite"],
-                })
-                .eq("utilizador_id", utilizador_id)
-                .eq("jogo_id", jid)
-                .execute()
-            )
-            if upd and getattr(upd, "data", None):
-                results.extend(upd.data)
-                continue
-        except Exception:
-            # continue to insert attempt if update fails for any reason
-            pass
+    if not payloads:
+        return []
 
-        # insert new row
-        try:
-            ins = client.table("palpites").insert(payload).execute()
-            if ins and getattr(ins, "data", None):
-                results.extend(ins.data)
-        except Exception:
-            # if insert fails, skip and continue to next
-            pass
+    results: list[dict[str, Any]] = []
+    try:
+        response = (
+            client.table("palpites")
+            .upsert(payloads, on_conflict="utilizador_id,jogo_id")
+            .execute()
+        )
+        if response and getattr(response, "data", None):
+            results.extend(response.data)
+    except Exception:
+        # Fallback: per-row update-then-insert in case the unique constraint
+        # is missing or the batched upsert fails for any reason.
+        for payload in payloads:
+            jid = payload["jogo_id"]
+            try:
+                upd = (
+                    client.table("palpites")
+                    .update({
+                        "golos_casa_palpite": payload["golos_casa_palpite"],
+                        "golos_fora_palpite": payload["golos_fora_palpite"],
+                    })
+                    .eq("utilizador_id", utilizador_id)
+                    .eq("jogo_id", jid)
+                    .execute()
+                )
+                if upd and getattr(upd, "data", None):
+                    results.extend(upd.data)
+                    continue
+            except Exception:
+                pass
+
+            # Only insert if no row exists yet (check via SELECT to avoid duplicates)
+            try:
+                existing = (
+                    client.table("palpites")
+                    .select("id")
+                    .eq("utilizador_id", utilizador_id)
+                    .eq("jogo_id", jid)
+                    .limit(1)
+                    .execute()
+                )
+                if existing and getattr(existing, "data", None):
+                    # Row exists but update returned nothing (likely no change). Treat as success.
+                    results.append(payload)
+                    continue
+            except Exception:
+                pass
+
+            try:
+                ins = client.table("palpites").insert(payload).execute()
+                if ins and getattr(ins, "data", None):
+                    results.extend(ins.data)
+            except Exception:
+                pass
 
     return results
 
