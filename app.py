@@ -664,9 +664,20 @@ def renderizar_ranking() -> None:
                 st.write("No finalized predictions.")
                 continue
             detalhes_df = pd.DataFrame(detalhes)
+            if "jogo_id" in detalhes_df.columns:
+                detalhes_df = detalhes_df.sort_values("jogo_id")
             detalhes_df["Match"] = detalhes_df.apply(lambda r: f"{r['equipa_casa']} vs {r['equipa_fora']}", axis=1)
-            detalhes_df = detalhes_df[["Match", "palpite", "resultado_real", "pontos"]]
-            detalhes_df = detalhes_df.rename(columns={"palpite": "Prediction", "resultado_real": "Actual Result", "pontos": "Points"})
+            for col in ("fase", "jornada"):
+                if col not in detalhes_df.columns:
+                    detalhes_df[col] = None
+            detalhes_df = detalhes_df[["Match", "fase", "jornada", "palpite", "resultado_real", "pontos"]]
+            detalhes_df = detalhes_df.rename(columns={
+                "fase": "Fase",
+                "jornada": "Jornada",
+                "palpite": "Prediction",
+                "resultado_real": "Actual Result",
+                "pontos": "Points",
+            })
             st.table(detalhes_df)
 
 

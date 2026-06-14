@@ -114,7 +114,7 @@ def get_ranking() -> list[dict]:
 
     # Load matches with real results
     jogos_resp = client.table("jogos").select(
-        "id, equipa_casa, equipa_fora, golos_casa_real, golos_fora_real, fase, data"
+        "id, equipa_casa, equipa_fora, golos_casa_real, golos_fora_real, fase, jornada, data"
     ).execute()
     jogos = {row["id"]: row for row in (jogos_resp.data or [])}
 
@@ -183,6 +183,8 @@ def get_ranking() -> list[dict]:
                 "jogo_id": jogo_id,
                 "equipa_casa": jogo.get("equipa_casa"),
                 "equipa_fora": jogo.get("equipa_fora"),
+                "fase": jogo.get("fase"),
+                "jornada": jogo.get("jornada"),
                 "palpite": f"{p_casa} - {p_fora}" if tem_palpite else "—",
                 "resultado_real": f"{r_casa} - {r_fora}",
                 "pontos": pontos,
@@ -203,6 +205,10 @@ def get_ranking() -> list[dict]:
             bonus += 50
         usuario["pontos_totais"] += bonus
         usuario["bonus_aplicado"] = bonus
+
+    # Order each user's per-game details by match ID
+    for usuario in usuarios.values():
+        usuario["palpites"].sort(key=lambda d: d.get("jogo_id") or 0)
 
     # Convert to sorted list
     ranking = sorted(usuarios.values(), key=lambda u: u["pontos_totais"], reverse=True)
