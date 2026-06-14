@@ -1,14 +1,76 @@
 """Operations on the predictions (palpites) table."""
 
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from database.supabase_client import get_supabase_client
 
 # Matches excluded from the ranking — points are always zero for these game IDs.
 JOGOS_EXCLUIDOS_RANKING: frozenset[int] = frozenset({1, 2})
 
+# Timezone in which jogos.hora_jogo is expressed. Change if your kickoff times
+# are stored in another zone (this MUST match the SQL cleanup query).
+LIGA_TIMEZONE = ZoneInfo("Europe/Lisbon")
 
-def calcular_pontos_jogo(p_casa: int, p_fora: int, r_casa: int | None, r_fora: int | None) -> int:
+# Message shown for a finished match where the user made no prediction.
+SEM_PALPITE_MSG = "0 points. No prediction was made for this match"
+
+
+def _tem_palpite(p_casa: int | None, p_fora: int | None) -> bool:
+    """A prediction only counts if BOTH goal values are present (not null)."""
+    return p_casa is not None and p_fora is not None
+
+
+def _to_int_or_none(value: Any) -> int | None:
+    """Coerce to int, returning None for null/blank/'-'/invalid values."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() in ("", "-", "—"):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _kickoff_datetime(data: Any, hora: Any) -> datetime | None:
+    """Build a timezone-aware kickoff datetime from jogos.data + jogos.hora_jogo.
+
+    Returns None when either piece is missing or unparseable, in which case the
+    match is treated as NOT started (so we never accidentally lock it).
+    """
+    if not data or not hora:
+        return None
+    try:
+        naive = datetime.fromisoformat(f"{data}T{hora}")
+    except ValueError:
+        return None
+    return naive.replace(tzinfo=LIGA_TIMEZONE)
+
+
+def _carregar_kickoffs(client, ids: list[int]) -> dict[int, datetime | None]:
+    """Load kickoff datetimes for the given match IDs."""
+    if not ids:
+        return {}
+    resp = (
+        client.table("jogos")
+        .select("id, data, hora_jogo")
+        .in_("id", list({i for i in ids if i is not None}))
+        .execute()
+    )
+    return {
+        row["id"]: _kickoff_datetime(row.get("data"), row.get("hora_jogo"))
+        for row in (resp.data or [])
+    }
+
+
+def calcular_pontos_jogo(
+    p_casa: int | None,
+    p_fora: int | None,
+    r_casa: int | None,
+    r_fora: int | None,
+) -> int:
     """Calcula os pontos de um único jogo segundo as regras fornecidas.
 
     Rules:
@@ -16,9 +78,13 @@ def calcular_pontos_jogo(p_casa: int, p_fora: int, r_casa: int | None, r_fora: i
     - Exact goal difference (only if trend correct): +3
     - Exact home goals: +2
     - Exact away goals: +2
-    Matches without real result return 0.
+    Matches without a real result, OR predictions without both goal values
+    (null/"no prediction"), return 0.
     """
     if r_casa is None or r_fora is None:
+        return 0
+    if p_casa is None or p_fora is None:
+        # No prediction was made for this match.
         return 0
     pontos = 0
     tendencia_real = 1 if r_casa > r_fora else (-1 if r_casa < r_fora else 0)
@@ -92,25 +158,22 @@ def get_ranking() -> list[dict]:
         if not jogo or jogo.get("golos_casa_real") is None or jogo.get("golos_fora_real") is None:
             continue
 
-        p_casa = p.get("golos_casa_palpite")
-        p_fora = p.get("golos_fora_palpite")
-        try:
-            p_casa = int(p_casa)
-            p_fora = int(p_fora)
-        except Exception:
+        # null golos => "no prediction"; kept as None instead of being skipped.
+        p_casa = _to_int_or_none(p.get("golos_casa_palpite"))
+        p_fora = _to_int_or_none(p.get("golos_fora_palpite"))
+        tem_palpite = _tem_palpite(p_casa, p_fora)
+
+        r_casa = _to_int_or_none(jogo.get("golos_casa_real"))
+        r_fora = _to_int_or_none(jogo.get("golos_fora_real"))
+        if r_casa is None or r_fora is None:
+            # real result not a clean integer — skip
             continue
 
-        r_casa = jogo.get("golos_casa_real")
-        r_fora = jogo.get("golos_fora_real")
-        try:
-            r_casa = int(r_casa)
-            r_fora = int(r_fora)
-        except Exception:
-            # se não forem inteiros, ignora
-            continue
-
-        # Hardcoded exclusion: excluded matches always count as zero points
-        pontos = 0 if jogo_id in JOGOS_EXCLUIDOS_RANKING else calcular_pontos_jogo(p_casa, p_fora, r_casa, r_fora)
+        # Excluded matches and matches with no prediction always score zero.
+        if jogo_id in JOGOS_EXCLUIDOS_RANKING or not tem_palpite:
+            pontos = 0
+        else:
+            pontos = calcular_pontos_jogo(p_casa, p_fora, r_casa, r_fora)
 
         usuario = usuarios.setdefault(uid, {"user_id": uid, "nome": perfis.get(uid, uid), "pontos_totais": 0, "palpites": []})
 
@@ -120,9 +183,11 @@ def get_ranking() -> list[dict]:
                 "jogo_id": jogo_id,
                 "equipa_casa": jogo.get("equipa_casa"),
                 "equipa_fora": jogo.get("equipa_fora"),
-                "palpite": f"{p_casa} - {p_fora}",
+                "palpite": f"{p_casa} - {p_fora}" if tem_palpite else "—",
                 "resultado_real": f"{r_casa} - {r_fora}",
                 "pontos": pontos,
+                "sem_palpite": not tem_palpite,
+                "mensagem": SEM_PALPITE_MSG if not tem_palpite else None,
             }
         )
 
@@ -187,6 +252,14 @@ def guardar_palpites_em_lote(
 ) -> list[dict[str, Any]]:
     """Faz upsert em lote na tabela 'palpites'.
 
+    Behaviour:
+    - Missing/None goal values are stored as NULL (i.e. "no prediction"). A user
+      who leaves a match as "-" and saves writes NULL, not 0-0.
+    - Matches that have ALREADY STARTED (kickoff <= now, in LIGA_TIMEZONE) are
+      LOCKED: they are skipped entirely, so a late-joining user never creates
+      0-0/null rows for past matches, and an existing valid prediction is never
+      overwritten when the user edits later matches.
+
     Uses Supabase upsert with on_conflict on (utilizador_id, jogo_id) to ensure
     that an existing prediction for the same user + match is UPDATED instead of
     creating a duplicate row. This relies on a UNIQUE constraint on
@@ -196,17 +269,29 @@ def guardar_palpites_em_lote(
         return []
     client = get_supabase_client()
 
+    # Resolve kickoff times so we can lock matches that already started.
+    ids = [p.get("jogo_id") for p in palpites if p.get("jogo_id") is not None]
+    kickoffs = _carregar_kickoffs(client, ids)
+    agora = datetime.now(LIGA_TIMEZONE)
+
     # Build the full payload list for a single batched upsert
     payloads: list[dict[str, Any]] = []
     for palpite in palpites:
         jid = palpite.get("jogo_id")
         if jid is None:
             continue
+
+        kickoff = kickoffs.get(jid)
+        if kickoff is not None and agora >= kickoff:
+            # Match already started — locked, never create or modify.
+            continue
+
         payloads.append({
             "utilizador_id": utilizador_id,
             "jogo_id": jid,
-            "golos_casa_palpite": palpite.get("golos_casa", 0),
-            "golos_fora_palpite": palpite.get("golos_fora", 0),
+            # None => stored as NULL ("no prediction"); allows clearing a 0-0.
+            "golos_casa_palpite": _to_int_or_none(palpite.get("golos_casa")),
+            "golos_fora_palpite": _to_int_or_none(palpite.get("golos_fora")),
         })
 
     if not payloads:
@@ -272,10 +357,12 @@ def guardar_palpites_em_lote(
 
 def get_palpites_por_jogo() -> dict[int, list[dict]]:
     """Returns predictions grouped by jogo_id, each entry includes user_id, nome,
-    palpite (formatted "X - Y") and pontos (None if match has no real result yet).
+    palpite (formatted "X - Y", or "—" when no prediction was made) and pontos
+    (None if match has no real result yet).
 
     Used by the match schedule to display other users' predictions and the
-    points they scored for each finished match.
+    points they scored for each finished match. Entries where both goal values
+    are null carry sem_palpite=True and a `mensagem` for finished matches.
     """
     client = get_supabase_client()
 
@@ -302,32 +389,34 @@ def get_palpites_por_jogo() -> dict[int, list[dict]]:
         if jogo_id is None or uid is None:
             continue
 
-        try:
-            p_casa = int(p.get("golos_casa_palpite"))
-            p_fora = int(p.get("golos_fora_palpite"))
-        except Exception:
-            continue
+        # null golos => "no prediction"; kept as None instead of being skipped.
+        p_casa = _to_int_or_none(p.get("golos_casa_palpite"))
+        p_fora = _to_int_or_none(p.get("golos_fora_palpite"))
+        tem_palpite = _tem_palpite(p_casa, p_fora)
 
         jogo = jogos.get(jogo_id) or {}
         r_casa = jogo.get("golos_casa_real")
         r_fora = jogo.get("golos_fora_real")
+        jogo_terminado = r_casa is not None and r_fora is not None
 
-        if r_casa is not None and r_fora is not None:
-            try:
-                if jogo_id in JOGOS_EXCLUIDOS_RANKING:
-                    pontos = 0
-                else:
-                    pontos = calcular_pontos_jogo(p_casa, p_fora, int(r_casa), int(r_fora))
-            except Exception:
+        if jogo_terminado:
+            if jogo_id in JOGOS_EXCLUIDOS_RANKING or not tem_palpite:
                 pontos = 0
+            else:
+                try:
+                    pontos = calcular_pontos_jogo(p_casa, p_fora, int(r_casa), int(r_fora))
+                except Exception:
+                    pontos = 0
         else:
             pontos = None
 
         result.setdefault(jogo_id, []).append({
             "user_id": uid,
             "nome": perfis.get(uid, uid),
-            "palpite": f"{p_casa} - {p_fora}",
+            "palpite": f"{p_casa} - {p_fora}" if tem_palpite else "—",
             "pontos": pontos,
+            "sem_palpite": not tem_palpite,
+            "mensagem": SEM_PALPITE_MSG if (not tem_palpite and jogo_terminado) else None,
         })
 
     # Sort each list by points descending (None goes last)

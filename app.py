@@ -902,9 +902,13 @@ def renderizar_admin() -> None:
                 updated = 0
                 for p in palpites_list:
                     try:
-                        p_casa = int(p.get("golos_casa_palpite") or 0)
-                        p_fora = int(p.get("golos_fora_palpite") or 0)
-                        pontos = calcular_pontos_jogo(p_casa, p_fora, int(golos_casa), int(golos_fora))
+                        gc = p.get("golos_casa_palpite")
+                        gf = p.get("golos_fora_palpite")
+                        # No prediction (either goal null) -> always zero points.
+                        if gc is None or gf is None:
+                            pontos = 0
+                        else:
+                            pontos = calcular_pontos_jogo(int(gc), int(gf), int(golos_casa), int(golos_fora))
                         resp = client.table("palpites").update({"pontos": pontos}).eq("id", p["id"]).execute()
                         if resp and getattr(resp, "data", None):
                             updated += 1
@@ -968,6 +972,21 @@ def renderizar_jogo_somente_leitura(jogo: dict[str, Any]) -> None:
         st.markdown(f'<p class="jogo-equipa">{jogo.get("equipa_fora", "—")}</p>', unsafe_allow_html=True)
 
     # compact separator handled by CSS; avoid Streamlit's default divider
+
+
+def _valor_palpite(v: Any) -> int | None:
+    """Stored goal value -> number_input value.
+
+    Returns the int when a prediction exists, or None so the input renders empty
+    ('-') when there is no prediction. Requires Streamlit >= 1.30 (number_input
+    value=None support).
+    """
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
@@ -1115,7 +1134,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                                     "Home goals",
                                     min_value=0,
                                     step=1,
-                                    value=int(palpite.get("golos_casa") or 0),
+                                    value=_valor_palpite(palpite.get("golos_casa")),
                                     key=f"golos_casa_{jogo_id}",
                                     label_visibility="collapsed",
                                     disabled=disabled,
@@ -1134,7 +1153,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                                 "Away goals",
                                 min_value=0,
                                 step=1,
-                                value=int(palpite.get("golos_fora") or 0),
+                                value=_valor_palpite(palpite.get("golos_fora")),
                                 key=f"golos_fora_{jogo_id}",
                                 label_visibility="collapsed",
                                 disabled=disabled,
@@ -1154,8 +1173,8 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     palpites_submetidos.append(
                         {
                             "jogo_id": jogo_id,
-                            "golos_casa": st.session_state.get(f"golos_casa_{jogo_id}", int(palpite.get("golos_casa") or 0)),
-                            "golos_fora": st.session_state.get(f"golos_fora_{jogo_id}", int(palpite.get("golos_fora") or 0)),
+                            "golos_casa": st.session_state.get(f"golos_casa_{jogo_id}"),
+                            "golos_fora": st.session_state.get(f"golos_fora_{jogo_id}"),
                         }
                     )
                     # If the match already has a real result, show it and the points for this user's palpite
@@ -1167,20 +1186,31 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                             r_casa = jogo.get("golos_casa_real")
                             r_fora = jogo.get("golos_fora_real")
 
-                        pontos_palpite = palpite.get("pontos")
-                        if pontos_palpite is None:
-                            try:
-                                pontos_palpite = calcular_pontos_jogo(
-                                    int(palpite.get("golos_casa") or 0),
-                                    int(palpite.get("golos_fora") or 0),
-                                    int(r_casa),
-                                    int(r_fora),
-                                )
-                            except Exception:
-                                pontos_palpite = 0
+                        gc = palpite.get("golos_casa")
+                        gf = palpite.get("golos_fora")
+                        sem_palpite = gc is None or gf is None
 
-                        # show centered English text with larger font
-                        st.markdown(f'<p class="resultado-real">Actual result: {int(r_casa)}-{int(r_fora)}<br>+{pontos_palpite} points</p>', unsafe_allow_html=True)
+                        if sem_palpite:
+                            # No prediction was made for this finished match.
+                            st.markdown(
+                                f'<p class="resultado-real">Actual result: {int(r_casa)}-{int(r_fora)}<br>0 points. No prediction was made for this match</p>',
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            pontos_palpite = palpite.get("pontos")
+                            if pontos_palpite is None:
+                                try:
+                                    pontos_palpite = calcular_pontos_jogo(
+                                        int(gc),
+                                        int(gf),
+                                        int(r_casa),
+                                        int(r_fora),
+                                    )
+                                except Exception:
+                                    pontos_palpite = 0
+
+                            # show centered English text with larger font
+                            st.markdown(f'<p class="resultado-real">Actual result: {int(r_casa)}-{int(r_fora)}<br>+{pontos_palpite} points</p>', unsafe_allow_html=True)
 
                         # Dropdown showing other users' predictions for this match
                         outras = [
@@ -1212,8 +1242,10 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                             jid = p["jogo_id"]
                             payloads.append({
                                 "jogo_id": jid,
-                                "golos_casa": int(st.session_state.get(f"golos_casa_{jid}", 0)),
-                                "golos_fora": int(st.session_state.get(f"golos_fora_{jid}", 0)),
+                                # None when left empty ('-'); guardar_palpites_em_lote
+                                # stores NULL and skips already-started matches.
+                                "golos_casa": st.session_state.get(f"golos_casa_{jid}"),
+                                "golos_fora": st.session_state.get(f"golos_fora_{jid}"),
                             })
                         results = guardar_palpites_em_lote(st.session_state.user_id, payloads)
                         if results:

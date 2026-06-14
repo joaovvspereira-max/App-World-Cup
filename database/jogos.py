@@ -43,4 +43,4 @@ def jogos_para_dataframe(jogos: list[dict[str, Any]]) -> pd.DataFrame:
             "equipa_fora": "Away Team",
             "fase": "Fase",
         }
-    )[["ID", "Equipa Casa", "Equipa Fora", "Resultado", "Fase"]]
+    )[["ID", "Home Team", "Away Team", "Resultado", "Fase"]]
