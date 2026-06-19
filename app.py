@@ -55,7 +55,7 @@ from database.palpites_macro import (
     OPCAO_OUTRO,
     PAISES_ELITE,
     get_palpite_macro,
-    guardar_palpite_macro,
+    get_todos_palpites_macro,
 )
 
 st.set_page_config(
@@ -464,11 +464,17 @@ def resolver_valor_previsao(selecionado: str, outro_texto: str) -> str:
 
 
 def renderizar_previsoes_macro() -> None:
-    """Special predictions section: World Cup winner and top scorer."""
+    """Special predictions section: World Cup winner and top scorer.
+
+    The fields are permanently locked (read-only): users can see their saved
+    picks but can never change them — there is no code path to write from this
+    page. Below the form, everyone else's picks are shown in a shared table
+    (Name / Winner / Top Scorer).
+    """
     st.subheader("Special Predictions: Winner & Top Scorer")
 
     if not utilizador_autenticado():
-        st.caption("Sign in in the sidebar to save your special predictions.")
+        st.caption("Sign in in the sidebar to view the special predictions.")
         return
 
     try:
@@ -476,6 +482,8 @@ def renderizar_previsoes_macro() -> None:
     except Exception as exc:
         st.error(f"Could not load your special predictions: {exc}")
         return
+
+    st.info("🔒 Special predictions are locked and can no longer be changed.")
 
     idx_vencedor, outro_vencedor = preparar_opcao_selectbox(
         palpite_macro.get("vencedor_mundial") if palpite_macro else None,
@@ -486,62 +494,75 @@ def renderizar_previsoes_macro() -> None:
         JOGADORES_ELITE,
     )
 
+    # Read-only view of the user's own picks. Every field is hard-disabled and
+    # there is no submit handler, so nothing can ever be written from here.
     with st.form("form_palpites_macro"):
         vencedor_selecionado = st.selectbox(
             "World Cup Winner",
             PAISES_ELITE,
             index=idx_vencedor,
+            disabled=True,
         )
-        vencedor_outro = ""
         if vencedor_selecionado == OPCAO_OUTRO:
-            vencedor_outro = st.text_input(
+            st.text_input(
                 "Specify the country",
                 value=outro_vencedor,
                 placeholder="Type the country name",
+                disabled=True,
             )
 
         marcador_selecionado = st.selectbox(
             "Top Scorer",
             JOGADORES_ELITE,
             index=idx_marcador,
+            disabled=True,
         )
-        marcador_outro = ""
         if marcador_selecionado == OPCAO_OUTRO:
-            marcador_outro = st.text_input(
+            st.text_input(
                 "Specify the player",
                 value=outro_marcador,
                 placeholder="Type the player name",
+                disabled=True,
             )
 
-        guardar_macro = st.form_submit_button(
-            "Save special predictions",
+        # A form requires a submit button; it is permanently disabled and its
+        # return value is intentionally ignored — saving is not possible here.
+        st.form_submit_button(
+            "Predictions locked",
             use_container_width=True,
+            disabled=True,
         )
 
     if palpite_macro and palpite_macro.get("atualizado_em"):
         st.caption(f"Last updated: {palpite_macro['atualizado_em']}")
 
-    if guardar_macro:
-        vencedor = resolver_valor_previsao(vencedor_selecionado, vencedor_outro)
-        marcador = resolver_valor_previsao(marcador_selecionado, marcador_outro)
+    # --- Other participants' special predictions -------------------------------
+    st.divider()
+    st.subheader("👥 Other participants' predictions")
 
-        if not vencedor or not marcador:
-            st.error("Please provide both the World Cup winner and the top scorer.")
-            return
+    try:
+        todos = get_todos_palpites_macro()
+    except Exception as exc:
+        st.error(f"Could not load other participants' predictions: {exc}")
+        return
 
-        try:
-            guardar_palpite_macro(
-                user_id=st.session_state.user_id,
-                vencedor_mundial=vencedor,
-                melhor_marcador=marcador,
-            )
-            success_placeholder = st.empty()
-            success_placeholder.success("✅ Special predictions saved successfully!")
-            time.sleep(3)
-            success_placeholder.empty()
-            st.rerun()
-        except Exception as exc:
-            st.error(f"❌ Error saving special predictions: {exc}")
+    outros = [
+        p for p in todos
+        if p.get("user_id") != st.session_state.user_id
+    ]
+
+    if not outros:
+        st.info("No other participants have made special predictions yet.")
+        return
+
+    df_outros = pd.DataFrame(outros)
+    df_outros = df_outros[["nome", "vencedor_mundial", "melhor_marcador"]]
+    df_outros = df_outros.rename(columns={
+        "nome": "Name",
+        "vencedor_mundial": "Winner",
+        "melhor_marcador": "Top Scorer",
+    })
+    st.table(df_outros)
 
 
 def renderizar_ranking() -> None:
@@ -1380,7 +1401,7 @@ elif pagina == "Schedule":
 
 elif pagina == "Special Predictions":
     st.markdown(
-        '<p class="subtitle">View and save your World Cup winner and top scorer predictions.</p>',
+        '<p class="subtitle">Predictions are locked — review your picks and see what everyone else chose.</p>',
         unsafe_allow_html=True,
     )
     renderizar_previsoes_macro()

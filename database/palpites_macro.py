@@ -78,3 +78,46 @@ def guardar_palpite_macro(
         .execute()
     )
     return response.data[0] if response.data else payload
+
+
+def get_todos_palpites_macro() -> list[dict[str, Any]]:
+    """Return every user's macro prediction together with their display name.
+
+    Mirrors how the match pages build "other users' predictions": names come
+    from the `perfis` table (id -> username), and palpites_macro.user_id maps
+    to perfis.id (the same join get_ranking already uses for macro bonuses).
+
+    Each entry has the keys:
+    user_id, nome, vencedor_mundial, melhor_marcador, atualizado_em.
+    """
+    client = get_supabase_client()
+
+    # Load all macro predictions.
+    response = (
+        client.table("palpites_macro")
+        .select("user_id, vencedor_mundial, melhor_marcador, atualizado_em")
+        .execute()
+    )
+    rows = response.data or []
+
+    # Load profiles to map user_id -> display name (same source as match pages).
+    perfis_resp = client.table("perfis").select("id, username").execute()
+    perfis = {
+        row["id"]: row.get("username") or row["id"]
+        for row in (perfis_resp.data or [])
+    }
+
+    resultado = [
+        {
+            "user_id": row.get("user_id"),
+            "nome": perfis.get(row.get("user_id"), row.get("user_id")),
+            "vencedor_mundial": row.get("vencedor_mundial"),
+            "melhor_marcador": row.get("melhor_marcador"),
+            "atualizado_em": row.get("atualizado_em"),
+        }
+        for row in rows
+    ]
+
+    # Stable display order: alphabetical by name.
+    resultado.sort(key=lambda x: str(x.get("nome") or "").lower())
+    return resultado
