@@ -255,24 +255,46 @@ def get_palpites_utilizador(utilizador_id: str) -> dict[int, dict[str, int]]:
 def guardar_palpites_em_lote(
     utilizador_id: str,
     palpites: list[dict[str, int]],
-) -> list[dict[str, Any]]:
-    """Faz upsert em lote na tabela 'palpites'.
+) -> dict[str, Any]:
+    """Persist a batch of predictions for one user, robustly and verifiably.
 
     Behaviour:
-    - Missing/None goal values are stored as NULL (i.e. "no prediction"). A user
-      who leaves a match as "-" and saves writes NULL, not 0-0.
-    - Matches that have ALREADY STARTED (kickoff <= now, in LIGA_TIMEZONE) are
-      LOCKED: they are skipped entirely, so a late-joining user never creates
-      0-0/null rows for past matches, and an existing valid prediction is never
-      overwritten when the user edits later matches.
+    - Missing/None goal values are stored as NULL ("no prediction"). A user who
+      leaves a match as "-" and saves writes NULL, never 0-0.
+    - A match is only written when BOTH goals are present OR both are empty
+      (clearing). A half-filled row (one box typed, the other empty) is treated
+      as "no prediction" and stored as NULL/NULL — it can never silently become
+      0-0.
+    - Matches that have ALREADY STARTED (kickoff <= now, LIGA_TIMEZONE) are
+      LOCKED and skipped entirely, so a late edit never overwrites or creates
+      rows for past matches.
 
-    Uses Supabase upsert with on_conflict on (utilizador_id, jogo_id) to ensure
-    that an existing prediction for the same user + match is UPDATED instead of
-    creating a duplicate row. This relies on a UNIQUE constraint on
-    (utilizador_id, jogo_id) at the database level.
+    Returns a structured report instead of a raw row list, so the UI can tell
+    the difference between "actually saved", "nothing to save", and "failed":
+
+        {
+            "ok": bool,                 # True only if every attempted write succeeded
+            "saved": [jogo_id, ...],    # ids confirmed written to the DB
+            "skipped_locked": [...],    # ids skipped because the match started
+            "failed": [...],            # ids that could not be written
+            "rows": [ ... ],            # the DB rows returned for saved predictions
+        }
+
+    Uses an upsert with on_conflict on (utilizador_id, jogo_id), which requires a
+    UNIQUE constraint on those two columns. After writing, it RE-READS the rows
+    to confirm the values actually landed — success is never assumed.
     """
+    report: dict[str, Any] = {
+        "ok": True,
+        "saved": [],
+        "skipped_locked": [],
+        "failed": [],
+        "rows": [],
+    }
     if not palpites:
-        return []
+        report["ok"] = False  # nothing happened; let caller decide messaging
+        return report
+
     client = get_supabase_client()
 
     # Resolve kickoff times so we can lock matches that already started.
@@ -280,7 +302,6 @@ def guardar_palpites_em_lote(
     kickoffs = _carregar_kickoffs(client, ids)
     agora = datetime.now(LIGA_TIMEZONE)
 
-    # Build the full payload list for a single batched upsert
     payloads: list[dict[str, Any]] = []
     for palpite in palpites:
         jid = palpite.get("jogo_id")
@@ -289,76 +310,106 @@ def guardar_palpites_em_lote(
 
         kickoff = kickoffs.get(jid)
         if kickoff is not None and agora >= kickoff:
-            # Match already started — locked, never create or modify.
+            report["skipped_locked"].append(jid)
             continue
+
+        casa = _to_int_or_none(palpite.get("golos_casa"))
+        fora = _to_int_or_none(palpite.get("golos_fora"))
+
+        # Half-filled => treat as no prediction (NULL/NULL). This prevents the
+        # "stored 0-0 by mistake" symptom: a stray 0 in one box never produces
+        # a scored 0-0 row on its own.
+        if (casa is None) != (fora is None):
+            casa = None
+            fora = None
 
         payloads.append({
             "utilizador_id": utilizador_id,
             "jogo_id": jid,
-            # None => stored as NULL ("no prediction"); allows clearing a 0-0.
-            "golos_casa_palpite": _to_int_or_none(palpite.get("golos_casa")),
-            "golos_fora_palpite": _to_int_or_none(palpite.get("golos_fora")),
+            "golos_casa_palpite": casa,
+            "golos_fora_palpite": fora,
         })
 
     if not payloads:
-        return []
+        # Everything was locked or invalid — not an error, but nothing saved.
+        report["ok"] = len(report["skipped_locked"]) > 0
+        return report
 
-    results: list[dict[str, Any]] = []
+    attempted_ids = {p["jogo_id"] for p in payloads}
+
+    # --- Primary path: one batched upsert -----------------------------------
+    upsert_failed = False
     try:
-        response = (
+        client.table("palpites").upsert(
+            payloads, on_conflict="utilizador_id,jogo_id"
+        ).execute()
+    except Exception:
+        upsert_failed = True
+
+    # --- Fallback: per-row upsert if the batch raised -----------------------
+    if upsert_failed:
+        for payload in payloads:
+            try:
+                client.table("palpites").upsert(
+                    payload, on_conflict="utilizador_id,jogo_id"
+                ).execute()
+            except Exception:
+                # Last resort: explicit update, then insert if missing.
+                jid = payload["jogo_id"]
+                try:
+                    existing = (
+                        client.table("palpites")
+                        .select("id")
+                        .eq("utilizador_id", utilizador_id)
+                        .eq("jogo_id", jid)
+                        .limit(1)
+                        .execute()
+                    )
+                    if existing and getattr(existing, "data", None):
+                        client.table("palpites").update({
+                            "golos_casa_palpite": payload["golos_casa_palpite"],
+                            "golos_fora_palpite": payload["golos_fora_palpite"],
+                        }).eq("utilizador_id", utilizador_id).eq(
+                            "jogo_id", jid
+                        ).execute()
+                    else:
+                        client.table("palpites").insert(payload).execute()
+                except Exception:
+                    pass  # verified below regardless
+
+    # --- Verification: re-read what is actually in the DB -------------------
+    # Success is confirmed by reading the rows back and comparing values, so we
+    # never report a save that did not persist.
+    verified_rows: list[dict[str, Any]] = []
+    try:
+        check = (
             client.table("palpites")
-            .upsert(payloads, on_conflict="utilizador_id,jogo_id")
+            .select("jogo_id, golos_casa_palpite, golos_fora_palpite")
+            .eq("utilizador_id", utilizador_id)
+            .in_("jogo_id", list(attempted_ids))
             .execute()
         )
-        if response and getattr(response, "data", None):
-            results.extend(response.data)
+        verified_rows = check.data or []
     except Exception:
-        # Fallback: per-row update-then-insert in case the unique constraint
-        # is missing or the batched upsert fails for any reason.
-        for payload in payloads:
-            jid = payload["jogo_id"]
-            try:
-                upd = (
-                    client.table("palpites")
-                    .update({
-                        "golos_casa_palpite": payload["golos_casa_palpite"],
-                        "golos_fora_palpite": payload["golos_fora_palpite"],
-                    })
-                    .eq("utilizador_id", utilizador_id)
-                    .eq("jogo_id", jid)
-                    .execute()
-                )
-                if upd and getattr(upd, "data", None):
-                    results.extend(upd.data)
-                    continue
-            except Exception:
-                pass
+        verified_rows = []
 
-            # Only insert if no row exists yet (check via SELECT to avoid duplicates)
-            try:
-                existing = (
-                    client.table("palpites")
-                    .select("id")
-                    .eq("utilizador_id", utilizador_id)
-                    .eq("jogo_id", jid)
-                    .limit(1)
-                    .execute()
-                )
-                if existing and getattr(existing, "data", None):
-                    # Row exists but update returned nothing (likely no change). Treat as success.
-                    results.append(payload)
-                    continue
-            except Exception:
-                pass
+    db_by_id = {r["jogo_id"]: r for r in verified_rows}
+    want_by_id = {p["jogo_id"]: p for p in payloads}
 
-            try:
-                ins = client.table("palpites").insert(payload).execute()
-                if ins and getattr(ins, "data", None):
-                    results.extend(ins.data)
-            except Exception:
-                pass
+    for jid, want in want_by_id.items():
+        got = db_by_id.get(jid)
+        if (
+            got is not None
+            and got.get("golos_casa_palpite") == want["golos_casa_palpite"]
+            and got.get("golos_fora_palpite") == want["golos_fora_palpite"]
+        ):
+            report["saved"].append(jid)
+            report["rows"].append(got)
+        else:
+            report["failed"].append(jid)
 
-    return results
+    report["ok"] = len(report["failed"]) == 0
+    return report
 
 
 def get_palpites_por_jogo() -> dict[int, list[dict]]:

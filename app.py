@@ -1036,7 +1036,6 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
     # build dynamic flag map from DB
     flag_map = build_flag_map_from_db()
 
-    palpites_submetidos: list[dict[str, int]] = []
     with st.form("form_palpites"):
         # removed top sticky save; per-tab save buttons will appear after each jornada's matches
         # group matches by the 'jornada' column (matchday)
@@ -1104,6 +1103,9 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
         for idx, jlabel in enumerate(jornadas):
             tab = tabs[idx]
             with tab:
+                # IDs belonging to THIS tab only — the Save button below must
+                # submit just these, never matches from other matchdays.
+                ids_desta_jornada: list[int] = []
                 # show counts below tabs for this jornada
                 rows = jogos_por_jornada[jlabel]
                 total = len(rows)
@@ -1115,6 +1117,7 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
 
                 for jogo in rows:
                     jogo_id = jogo["id"]
+                    ids_desta_jornada.append(jogo_id)
                     palpite = palpites_existentes.get(jogo_id, {})
 
                     # disable prediction input if match has already started
@@ -1202,13 +1205,8 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                         )
                         st.markdown(img_fora, unsafe_allow_html=True)
 
-                    palpites_submetidos.append(
-                        {
-                            "jogo_id": jogo_id,
-                            "golos_casa": st.session_state.get(f"golos_casa_{jogo_id}"),
-                            "golos_fora": st.session_state.get(f"golos_fora_{jogo_id}"),
-                        }
-                    )
+                    # (Per-tab save reads widget state directly from
+                    # ids_desta_jornada below; no global accumulator needed.)
                     # If the match already has a real result, show it and the points for this user's palpite
                     if jogo.get("golos_casa_real") is not None and jogo.get("golos_fora_real") is not None:
                         try:
@@ -1262,32 +1260,68 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                     # do not render extra spacer when result exists
                     st.markdown('</div>', unsafe_allow_html=True)
 
-                # One Save button per jornada (after listing all matches in this tab)
+                # One Save button per jornada (after listing all matches in this
+                # tab). Each label MUST be unique within the form, otherwise
+                # Streamlit raises DuplicateWidgetID; the matchday name makes it
+                # unique. (form_submit_button does NOT accept a `key` argument.)
                 st.markdown('<div class="save-card">', unsafe_allow_html=True)
-                guardar_j = st.form_submit_button("💾 SAVE PREDICTIONS", key=f"save_{idx}_{jlabel}", use_container_width=True)
+                _label_jornada = str(jlabel) if str(jlabel) else f"matchday {idx + 1}"
+                guardar_j = st.form_submit_button(
+                    f"💾 SAVE PREDICTIONS — {_label_jornada}",
+                    use_container_width=True,
+                )
                 st.markdown('</div>', unsafe_allow_html=True)
 
                 if guardar_j:
                     try:
+                        # Build payloads from THIS tab's matches only, reading
+                        # each value straight from its widget key.
                         payloads = []
-                        for p in palpites_submetidos:
-                            jid = p["jogo_id"]
+                        for jid in ids_desta_jornada:
                             payloads.append({
                                 "jogo_id": jid,
-                                # None when left empty ('-'); guardar_palpites_em_lote
-                                # stores NULL and skips already-started matches.
+                                # None when the box is empty ('-'); the DB layer
+                                # stores NULL, skips started matches, and treats
+                                # a half-filled pair as "no prediction".
                                 "golos_casa": st.session_state.get(f"golos_casa_{jid}"),
                                 "golos_fora": st.session_state.get(f"golos_fora_{jid}"),
                             })
-                        results = guardar_palpites_em_lote(st.session_state.user_id, payloads)
-                        if results:
-                            success_placeholder = st.empty()
-                            success_placeholder.success(f"✅ {len(results)} prediction(s) saved successfully!")
-                            time.sleep(3)
-                            success_placeholder.empty()
+
+                        report = guardar_palpites_em_lote(
+                            st.session_state.user_id, payloads
+                        )
+
+                        saved = report.get("saved", [])
+                        failed = report.get("failed", [])
+                        locked = report.get("skipped_locked", [])
+
+                        if failed:
+                            # Some rows did NOT persist — say so honestly rather
+                            # than showing a false success.
+                            st.error(
+                                f"⚠️ {len(saved)} saved, but {len(failed)} "
+                                f"prediction(s) could NOT be saved "
+                                f"(matches: {', '.join(map(str, failed))}). "
+                                "Please try again."
+                            )
+                            if saved:
+                                st.rerun()
+                        elif saved:
+                            msg = f"✅ {len(saved)} prediction(s) saved successfully!"
+                            if locked:
+                                msg += f" ({len(locked)} already-started match(es) were locked.)"
+                            placeholder = st.empty()
+                            placeholder.success(msg)
+                            time.sleep(2)
+                            placeholder.empty()
                             st.rerun()
+                        elif locked and not saved:
+                            st.warning(
+                                "These matches have already started and are "
+                                "locked, so nothing was changed."
+                            )
                         else:
-                            st.error("❌ Could not save predictions. Please try again or sign out and back in.")
+                            st.info("No predictions to save in this matchday.")
                     except Exception as exc:
                         st.error(f"❌ Error saving predictions: {exc}")
 
