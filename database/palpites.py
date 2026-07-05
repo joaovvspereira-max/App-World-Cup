@@ -72,19 +72,6 @@ def _normalize_stored_points(value: Any) -> int:
         return 0
 
 
-def _calculate_points_for_finished_prediction(
-    palpite: dict[str, Any], jogo: dict[str, Any]
-) -> int:
-    """Recompute the points for a finished prediction from stored values."""
-    p_casa = _to_int_or_none(palpite.get("golos_casa_palpite"))
-    p_fora = _to_int_or_none(palpite.get("golos_fora_palpite"))
-    r_casa = _to_int_or_none(jogo.get("golos_casa_real"))
-    r_fora = _to_int_or_none(jogo.get("golos_fora_real"))
-    if p_casa is None or p_fora is None:
-        return 0
-    return calcular_pontos_jogo(p_casa, p_fora, r_casa, r_fora)
-
-
 def calcular_pontos_jogo(
     p_casa: int | None,
     p_fora: int | None,
@@ -192,27 +179,14 @@ def get_ranking() -> list[dict]:
     perfis = {row["id"]: row.get("username") or row["id"] for row in (perfis_resp.data or [])}
 
     usuarios: dict[str, dict] = {}
-    stale_updates: list[tuple[int, int]] = []
 
     for p in palpites:
         uid = p.get("utilizador_id")
-        jogo_id = p.get("jogo_id")
-        if uid is None or jogo_id is None:
-            continue
-
-        jogo = jogos_por_id.get(jogo_id)
-        if jogo is None:
+        if uid is None:
             continue
 
         pontos_salvos = p.get("pontos")
-        pontos_stored = _normalize_stored_points(pontos_salvos)
-        pontos_calculated = _calculate_points_for_finished_prediction(p, jogo)
-
-        if pontos_stored != pontos_calculated:
-            stale_updates.append((p["id"], pontos_calculated))
-            pontos = pontos_calculated
-        else:
-            pontos = pontos_stored
+        pontos = _normalize_stored_points(pontos_salvos)
 
         usuario = usuarios.setdefault(
             uid,
@@ -224,12 +198,6 @@ def get_ranking() -> list[dict]:
         )
 
         usuario["pontos_totais"] += pontos
-
-    for palpite_id, pontos in stale_updates:
-        try:
-            client.table("palpites").update({"pontos": pontos}).eq("id", palpite_id).execute()
-        except Exception:
-            continue
 
     ranking = sorted(
         usuarios.values(),
