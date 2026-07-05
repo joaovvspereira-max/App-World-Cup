@@ -137,11 +137,10 @@ def atualizar_pontos_jogo(jogo_id: int, r_casa: int | None, r_fora: int | None, 
 
 
 def get_ranking() -> list[dict]:
-    """Build the leaderboard from the stored points in palpites for finished matches.
+    """Build the leaderboard from stored palpites points.
 
-    The ranking is computed from the real `pontos` values already saved in the
-    `palpites` table for each prediction. Only matches that already have an
-    official result in `jogos` are included.
+    This function aggregates the `pontos` values saved in the `palpites` table
+    for all predictions, and uses the stored match metadata only for display.
     """
     client = get_supabase_client()
 
@@ -149,12 +148,6 @@ def get_ranking() -> list[dict]:
         "id, equipa_casa, equipa_fora, golos_casa_real, golos_fora_real, fase, jornada"
     ).execute()
     jogos = {row["id"]: row for row in (jogos_resp.data or [])}
-
-    finished_ids = {
-        row["id"]
-        for row in (jogos_resp.data or [])
-        if row.get("golos_casa_real") is not None and row.get("golos_fora_real") is not None
-    }
 
     palpites_resp = client.table("palpites").select(
         "id, utilizador_id, jogo_id, golos_casa_palpite, golos_fora_palpite, pontos"
@@ -183,20 +176,7 @@ def get_ranking() -> list[dict]:
     for p in palpites:
         uid = p.get("utilizador_id")
         jogo_id = p.get("jogo_id")
-        if uid is None or jogo_id is None or jogo_id not in finished_ids:
-            continue
-
-        jogo = jogos.get(jogo_id)
-        if not jogo:
-            continue
-
-        p_casa = _to_int_or_none(p.get("golos_casa_palpite"))
-        p_fora = _to_int_or_none(p.get("golos_fora_palpite"))
-        tem_palpite = _tem_palpite(p_casa, p_fora)
-
-        r_casa = _to_int_or_none(jogo.get("golos_casa_real"))
-        r_fora = _to_int_or_none(jogo.get("golos_fora_real"))
-        if r_casa is None or r_fora is None:
+        if uid is None or jogo_id is None:
             continue
 
         pontos_salvos = p.get("pontos")
@@ -204,6 +184,13 @@ def get_ranking() -> list[dict]:
             pontos = int(pontos_salvos) if pontos_salvos is not None else 0
         except (TypeError, ValueError):
             pontos = 0
+
+        jogo = jogos.get(jogo_id, {})
+        p_casa = _to_int_or_none(p.get("golos_casa_palpite"))
+        p_fora = _to_int_or_none(p.get("golos_fora_palpite"))
+        tem_palpite = _tem_palpite(p_casa, p_fora)
+        r_casa = _to_int_or_none(jogo.get("golos_casa_real"))
+        r_fora = _to_int_or_none(jogo.get("golos_fora_real"))
 
         usuario = usuarios.setdefault(
             uid,
@@ -216,6 +203,23 @@ def get_ranking() -> list[dict]:
         )
 
         usuario["pontos_totais"] += pontos
+        usuario["macro_info"] = macros.get(uid)
+        usuario["vencedor_real"] = vencedor_real
+        usuario["melhor_marcador_real"] = melhor_marcador_real
+        usuario["macro_bonus_candidate"] = 0
+        usuario["macro_bonus_details"] = {
+            "vencedor_mundial": {
+                "prediction": macros.get(uid, {}).get("vencedor_mundial"),
+                "actual": vencedor_real,
+                "points": 0,
+            },
+            "melhor_marcador": {
+                "prediction": macros.get(uid, {}).get("melhor_marcador"),
+                "actual": melhor_marcador_real,
+                "points": 0,
+            },
+        }
+
         usuario["palpites"].append(
             {
                 "jogo_id": jogo_id,
@@ -224,24 +228,12 @@ def get_ranking() -> list[dict]:
                 "fase": jogo.get("fase"),
                 "jornada": jogo.get("jornada"),
                 "palpite": f"{p_casa} - {p_fora}" if tem_palpite else "—",
-                "resultado_real": f"{r_casa} - {r_fora}",
+                "resultado_real": f"{r_casa} - {r_fora}" if r_casa is not None and r_fora is not None else "—",
                 "pontos": pontos,
                 "sem_palpite": not tem_palpite,
-                "mensagem": SEM_PALPITE_MSG if not tem_palpite else None,
+                "mensagem": SEM_PALPITE_MSG if not tem_palpite and r_casa is not None and r_fora is not None else None,
             }
         )
-
-    for uid, usuario in usuarios.items():
-        macro = macros.get(uid)
-        if not macro:
-            continue
-        bonus = 0
-        if vencedor_real and macro.get("vencedor_mundial") and macro.get("vencedor_mundial") == vencedor_real:
-            bonus += 50
-        if melhor_marcador_real and macro.get("melhor_marcador") and macro.get("melhor_marcador") == melhor_marcador_real:
-            bonus += 50
-        usuario["pontos_totais"] += bonus
-        usuario["bonus_aplicado"] = bonus
 
     for usuario in usuarios.values():
         usuario["palpites"].sort(key=lambda d: d.get("jogo_id") or 0)
