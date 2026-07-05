@@ -137,46 +137,36 @@ def atualizar_pontos_jogo(jogo_id: int, r_casa: int | None, r_fora: int | None, 
 
 
 def get_ranking() -> list[dict]:
-    """Build the leaderboard from stored palpites points.
+    """Build the leaderboard exactly as the raw SQL aggregation query.
 
-    This function aggregates the `pontos` values saved in the `palpites` table
-    for all predictions, and uses the stored match metadata only for display.
+    This function returns a list of users with their total stored points from
+    finished matches only.
     """
     client = get_supabase_client()
 
-    jogos_resp = client.table("jogos").select(
-        "id, equipa_casa, equipa_fora, golos_casa_real, golos_fora_real, fase, jornada"
-    ).execute()
-    jogos = {row["id"]: row for row in (jogos_resp.data or [])}
+    jogos_resp = client.table("jogos").select("id, golos_casa_real, golos_fora_real").execute()
+    finished_jogo_ids = {
+        row["id"]
+        for row in (jogos_resp.data or [])
+        if row.get("golos_casa_real") is not None and row.get("golos_fora_real") is not None
+    }
 
-    palpites_resp = client.table("palpites").select(
-        "id, utilizador_id, jogo_id, golos_casa_palpite, golos_fora_palpite, pontos"
-    ).execute()
+    palpites_resp = (
+        client.table("palpites")
+        .select("utilizador_id, jogo_id, pontos")
+        .in_("jogo_id", list(finished_jogo_ids))
+        .execute()
+    )
     palpites = palpites_resp.data or []
 
     perfis_resp = client.table("perfis").select("id, username").execute()
     perfis = {row["id"]: row.get("username") or row["id"] for row in (perfis_resp.data or [])}
 
-    macro_resp = client.table("palpites_macro").select("user_id, vencedor_mundial, melhor_marcador").execute()
-    macros = {row["user_id"]: row for row in (macro_resp.data or [])}
-
-    vencedor_real = None
-    melhor_marcador_real = None
-    try:
-        res_macro = client.table("resultado_macro").select("vencedor_mundial, melhor_marcador").limit(1).execute()
-        if res_macro.data:
-            vencedor_real = res_macro.data[0].get("vencedor_mundial")
-            melhor_marcador_real = res_macro.data[0].get("melhor_marcador")
-    except Exception:
-        vencedor_real = None
-        melhor_marcador_real = None
-
     usuarios: dict[str, dict] = {}
 
     for p in palpites:
         uid = p.get("utilizador_id")
-        jogo_id = p.get("jogo_id")
-        if uid is None or jogo_id is None:
+        if uid is None:
             continue
 
         pontos_salvos = p.get("pontos")
@@ -185,60 +175,24 @@ def get_ranking() -> list[dict]:
         except (TypeError, ValueError):
             pontos = 0
 
-        jogo = jogos.get(jogo_id, {})
-        p_casa = _to_int_or_none(p.get("golos_casa_palpite"))
-        p_fora = _to_int_or_none(p.get("golos_fora_palpite"))
-        tem_palpite = _tem_palpite(p_casa, p_fora)
-        r_casa = _to_int_or_none(jogo.get("golos_casa_real"))
-        r_fora = _to_int_or_none(jogo.get("golos_fora_real"))
-
         usuario = usuarios.setdefault(
             uid,
             {
                 "user_id": uid,
                 "nome": perfis.get(uid, uid),
                 "pontos_totais": 0,
-                "palpites": [],
             },
         )
 
         usuario["pontos_totais"] += pontos
-        usuario["macro_info"] = macros.get(uid)
-        usuario["vencedor_real"] = vencedor_real
-        usuario["melhor_marcador_real"] = melhor_marcador_real
-        usuario["macro_bonus_candidate"] = 0
-        usuario["macro_bonus_details"] = {
-            "vencedor_mundial": {
-                "prediction": macros.get(uid, {}).get("vencedor_mundial"),
-                "actual": vencedor_real,
-                "points": 0,
-            },
-            "melhor_marcador": {
-                "prediction": macros.get(uid, {}).get("melhor_marcador"),
-                "actual": melhor_marcador_real,
-                "points": 0,
-            },
-        }
 
-        usuario["palpites"].append(
-            {
-                "jogo_id": jogo_id,
-                "equipa_casa": jogo.get("equipa_casa"),
-                "equipa_fora": jogo.get("equipa_fora"),
-                "fase": jogo.get("fase"),
-                "jornada": jogo.get("jornada"),
-                "palpite": f"{p_casa} - {p_fora}" if tem_palpite else "—",
-                "resultado_real": f"{r_casa} - {r_fora}" if r_casa is not None and r_fora is not None else "—",
-                "pontos": pontos,
-                "sem_palpite": not tem_palpite,
-                "mensagem": SEM_PALPITE_MSG if not tem_palpite and r_casa is not None and r_fora is not None else None,
-            }
-        )
+    ranking = sorted(
+        usuarios.values(),
+        key=lambda u: (u["pontos_totais"], u["user_id"]),
+        reverse=True,
+    )
 
-    for usuario in usuarios.values():
-        usuario["palpites"].sort(key=lambda d: d.get("jogo_id") or 0)
-
-    return sorted(usuarios.values(), key=lambda u: u["pontos_totais"], reverse=True)
+    return ranking
 
 
 def submeter_palpite(

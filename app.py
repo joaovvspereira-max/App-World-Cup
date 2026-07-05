@@ -671,37 +671,6 @@ def renderizar_ranking() -> None:
     except Exception:
         st.markdown(table_html, unsafe_allow_html=True)
 
-    st.write("")
-
-    for pos, usuario in enumerate(ranking, start=1):
-        nome = usuario.get("nome")
-        pontos = usuario.get("pontos_totais", 0)
-        detalhes = usuario.get("palpites", [])
-        bonus = usuario.get("bonus_aplicado", 0)
-        icon = MEDAL_STYLES[pos]["icon"] if pos in MEDAL_STYLES else f"{pos}."
-        label = f"{icon} {nome} — {pontos} pts{' (+' + str(bonus) + ' bonus)' if bonus else ''}"
-
-        with st.expander(label):
-            if not detalhes:
-                st.write("No finalized predictions.")
-                continue
-            detalhes_df = pd.DataFrame(detalhes)
-            if "jogo_id" in detalhes_df.columns:
-                detalhes_df = detalhes_df.sort_values("jogo_id")
-            detalhes_df["Match"] = detalhes_df.apply(lambda r: f"{r['equipa_casa']} vs {r['equipa_fora']}", axis=1)
-            for col in ("fase", "jornada"):
-                if col not in detalhes_df.columns:
-                    detalhes_df[col] = None
-            detalhes_df = detalhes_df[["Match", "fase", "jornada", "palpite", "resultado_real", "pontos"]]
-            detalhes_df = detalhes_df.rename(columns={
-                "fase": "Fase",
-                "jornada": "Jornada",
-                "palpite": "Prediction",
-                "resultado_real": "Actual Result",
-                "pontos": "Points",
-            })
-            st.table(detalhes_df)
-
 
 def renderizar_auth() -> None:
     """Login and register form in the sidebar."""
