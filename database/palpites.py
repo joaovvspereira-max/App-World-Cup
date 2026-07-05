@@ -101,6 +101,44 @@ def calcular_pontos_jogo(
     return pontos
 
 
+def atualizar_pontos_jogo(jogo_id: int, r_casa: int | None, r_fora: int | None, client=None) -> int:
+    """Persist points for every prediction on a match once the real result exists."""
+    if client is None:
+        client = get_supabase_client()
+
+    if jogo_id is None:
+        return 0
+
+    try:
+        resp = (
+            client.table("palpites")
+            .select("id, golos_casa_palpite, golos_fora_palpite")
+            .eq("jogo_id", jogo_id)
+            .execute()
+        )
+    except Exception:
+        return 0
+
+    updated = 0
+    for p in resp.data or []:
+        try:
+            p_casa = _to_int_or_none(p.get("golos_casa_palpite"))
+            p_fora = _to_int_or_none(p.get("golos_fora_palpite"))
+            if r_casa is None or r_fora is None:
+                pontos = None
+            elif p_casa is None or p_fora is None:
+                pontos = 0
+            else:
+                pontos = calcular_pontos_jogo(p_casa, p_fora, r_casa, r_fora)
+
+            client.table("palpites").update({"pontos": pontos}).eq("id", p["id"]).execute()
+            updated += 1
+        except Exception:
+            continue
+
+    return updated
+
+
 def get_ranking() -> list[dict]:
     """Compila o ranking baseado em todos os palpites e resultados reais.
 
@@ -118,9 +156,10 @@ def get_ranking() -> list[dict]:
     ).execute()
     jogos = {row["id"]: row for row in (jogos_resp.data or [])}
 
-    # Load all predictions
+    # Load all predictions with their persisted points and row ids so ranking
+    # can use stored values and backfill missing ones for finished matches.
     palpites_resp = client.table("palpites").select(
-        "utilizador_id, jogo_id, golos_casa_palpite, golos_fora_palpite"
+        "id, utilizador_id, jogo_id, golos_casa_palpite, golos_fora_palpite, pontos"
     ).execute()
     palpites = palpites_resp.data or []
 
@@ -169,11 +208,22 @@ def get_ranking() -> list[dict]:
             # real result not a clean integer — skip
             continue
 
-        # Excluded matches and matches with no prediction always score zero.
-        if jogo_id in JOGOS_EXCLUIDOS_RANKING or not tem_palpite:
+        # Prefer the persisted per-match points when available; fall back to
+        # recomputing from the official result if the row has not been backfilled.
+        pontos_salvos = p.get("pontos")
+        if pontos_salvos is not None:
+            try:
+                pontos = int(pontos_salvos)
+            except (TypeError, ValueError):
+                pontos = 0
+        elif jogo_id in JOGOS_EXCLUIDOS_RANKING or not tem_palpite:
             pontos = 0
         else:
             pontos = calcular_pontos_jogo(p_casa, p_fora, r_casa, r_fora)
+            try:
+                client.table("palpites").update({"pontos": pontos}).eq("id", p["id"]).execute()
+            except Exception:
+                pass
 
         usuario = usuarios.setdefault(uid, {"user_id": uid, "nome": perfis.get(uid, uid), "pontos_totais": 0, "palpites": []})
 
@@ -384,7 +434,7 @@ def guardar_palpites_em_lote(
     try:
         check = (
             client.table("palpites")
-            .select("jogo_id, golos_casa_palpite, golos_fora_palpite")
+            .select("id, jogo_id, golos_casa_palpite, golos_fora_palpite")
             .eq("utilizador_id", utilizador_id)
             .in_("jogo_id", list(attempted_ids))
             .execute()
@@ -396,6 +446,19 @@ def guardar_palpites_em_lote(
     db_by_id = {r["jogo_id"]: r for r in verified_rows}
     want_by_id = {p["jogo_id"]: p for p in payloads}
 
+    # If a real result is already known for the match, persist the computed
+    # points in the predictions table immediately so ranking reads are accurate.
+    try:
+        jogos_resp = (
+            client.table("jogos")
+            .select("id, golos_casa_real, golos_fora_real")
+            .in_("id", list(attempted_ids))
+            .execute()
+        )
+        jogos_por_id = {row["id"]: row for row in (jogos_resp.data or [])}
+    except Exception:
+        jogos_por_id = {}
+
     for jid, want in want_by_id.items():
         got = db_by_id.get(jid)
         if (
@@ -405,6 +468,21 @@ def guardar_palpites_em_lote(
         ):
             report["saved"].append(jid)
             report["rows"].append(got)
+
+            jogo = jogos_por_id.get(jid) or {}
+            r_casa = _to_int_or_none(jogo.get("golos_casa_real"))
+            r_fora = _to_int_or_none(jogo.get("golos_fora_real"))
+            if r_casa is not None and r_fora is not None:
+                try:
+                    p_casa = _to_int_or_none(got.get("golos_casa_palpite"))
+                    p_fora = _to_int_or_none(got.get("golos_fora_palpite"))
+                    if p_casa is None or p_fora is None:
+                        pontos = 0
+                    else:
+                        pontos = calcular_pontos_jogo(p_casa, p_fora, r_casa, r_fora)
+                    client.table("palpites").update({"pontos": pontos}).eq("id", got["id"]).execute()
+                except Exception:
+                    pass
         else:
             report["failed"].append(jid)
 

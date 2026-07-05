@@ -23,6 +23,7 @@ from database.palpites import (
     submeter_palpite,
     get_ranking,
     calcular_pontos_jogo,
+    atualizar_pontos_jogo,
 )
 import os
 from pathlib import Path
@@ -931,22 +932,7 @@ def renderizar_admin() -> None:
                     st.warning(f"Result saved but failed to load predictions for scoring: {exc}")
                     st.rerun()
 
-                updated = 0
-                for p in palpites_list:
-                    try:
-                        gc = p.get("golos_casa_palpite")
-                        gf = p.get("golos_fora_palpite")
-                        # No prediction (either goal null) -> always zero points.
-                        if gc is None or gf is None:
-                            pontos = 0
-                        else:
-                            pontos = calcular_pontos_jogo(int(gc), int(gf), int(golos_casa), int(golos_fora))
-                        resp = client.table("palpites").update({"pontos": pontos}).eq("id", p["id"]).execute()
-                        if resp and getattr(resp, "data", None):
-                            updated += 1
-                    except Exception:
-                        # skip failures per-row
-                        pass
+                updated = atualizar_pontos_jogo(jogo["id"], int(golos_casa), int(golos_fora), client=client)
 
                 st.success(f"Result saved and updated {updated} prediction(s) with points.")
                 st.rerun()
