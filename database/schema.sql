@@ -28,6 +28,7 @@ CREATE TABLE palpites (
     jogo_id INT REFERENCES jogos(id),
     golos_casa_palpite INT,
     golos_fora_palpite INT,
+    pontos INT DEFAULT NULL,
     UNIQUE (utilizador_id, jogo_id)
 );
 
@@ -40,8 +41,3 @@ CREATE TABLE palpites_macro (
     atualizado_em TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Dados de exemplo (opcional)
-INSERT INTO jogos (equipa_casa, equipa_fora, fase, data, grupo, cidade) VALUES
-    ('Portugal', 'Brasil', 'Grupos', '2026-06-15', 'H', 'Los Angeles'),
-    ('Espanha', 'França', 'Grupos', '2026-06-16', 'A', 'Nova Iorque'),
-    ('Alemanha', 'Argentina', 'Grupos', '2026-06-17', 'B', 'Dallas');

@@ -13,6 +13,49 @@ LIGA_TIMEZONE = ZoneInfo("Europe/Lisbon")
 # Message shown for a finished match where the user made no prediction.
 SEM_PALPITE_MSG = "0 points. No prediction was made for this match"
 
+# Match IDs that should never award points in the schedule/ranking views.
+# (Used by get_palpites_por_jogo.) Add jogo_id values here to exclude them.
+# Empty by default: no matches are excluded.
+JOGOS_EXCLUIDOS_RANKING: frozenset[int] = frozenset()
+
+# PostgREST returns at most this many rows per request by default. Any query
+# whose result can exceed it MUST be paginated, or rows are silently dropped.
+_PAGE_SIZE = 1000
+
+
+def _fetch_all(
+    client,
+    table: str,
+    columns: str,
+    *,
+    filtro=None,
+    order_col: str = "id",
+    page_size: int = _PAGE_SIZE,
+) -> list[dict[str, Any]]:
+    """Fetch EVERY row of a query, paging past PostgREST's default row cap.
+
+    A single ``.execute()`` returns at most ``page_size`` rows (Supabase's
+    default is 1000). Summing points from a truncated result silently
+    undercounts users, so anything that can exceed the cap must page through
+    all rows. ``filtro`` is an optional callable that receives the query
+    builder and returns it with extra filters applied.
+    """
+    rows: list[dict[str, Any]] = []
+    start = 0
+    while True:
+        query = client.table(table).select(columns)
+        if filtro is not None:
+            query = filtro(query)
+        # A stable order is required so pages don't overlap or skip rows.
+        query = query.order(order_col).range(start, start + page_size - 1)
+        resp = query.execute()
+        batch = resp.data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        start += page_size
+    return rows
+
 
 def _tem_palpite(p_casa: int | None, p_fora: int | None) -> bool:
     """A prediction only counts if BOTH goal values are present (not null)."""
@@ -155,38 +198,48 @@ def get_ranking() -> list[dict]:
     """
     client = get_supabase_client()
 
-    jogos_resp = client.table("jogos").select("id, golos_casa_real, golos_fora_real").execute()
-    finished_jogos = [
-        row
-        for row in (jogos_resp.data or [])
-        if row.get("golos_casa_real") is not None and row.get("golos_fora_real") is not None
-    ]
-    finished_jogo_ids = [row["id"] for row in finished_jogos]
-    jogos_por_id = {row["id"]: row for row in finished_jogos}
+    # --- Finished matches only (both real goals present) --------------------
+    # Mirrors the SQL WHERE clause on jogos.
+    jogos = _fetch_all(client, "jogos", "id, golos_casa_real, golos_fora_real")
+    finished_jogo_ids = {
+        row["id"]
+        for row in jogos
+        if row.get("golos_casa_real") is not None
+        and row.get("golos_fora_real") is not None
+    }
 
     if not finished_jogo_ids:
         return []
 
-    palpites_resp = (
-        client.table("palpites")
-        .select("id, utilizador_id, jogo_id, golos_casa_palpite, golos_fora_palpite, pontos")
-        .in_("jogo_id", finished_jogo_ids)
-        .execute()
+    # --- All predictions, paginated ----------------------------------------
+    # This is the critical fix: a single request is capped at 1000 rows, so a
+    # large pool of predictions was being silently truncated and everyone's
+    # total came out too low. We page through every row, then keep only those
+    # on finished matches (equivalent to the SQL JOIN + WHERE). Filtering in
+    # Python also avoids a huge `IN (...)` list in the request URL.
+    palpites = _fetch_all(
+        client, "palpites", "utilizador_id, jogo_id, pontos"
     )
-    palpites = palpites_resp.data or []
 
-    perfis_resp = client.table("perfis").select("id, username").execute()
-    perfis = {row["id"]: row.get("username") or row["id"] for row in (perfis_resp.data or [])}
+    # --- Profiles (id -> username), paginated for safety --------------------
+    perfis_rows = _fetch_all(client, "perfis", "id, username")
+    perfis = {
+        row["id"]: row.get("username") or row["id"] for row in perfis_rows
+    }
 
     usuarios: dict[str, dict] = {}
 
     for p in palpites:
+        if p.get("jogo_id") not in finished_jogo_ids:
+            continue
+
         uid = p.get("utilizador_id")
         if uid is None:
             continue
 
-        pontos_salvos = p.get("pontos")
-        pontos = _normalize_stored_points(pontos_salvos)
+        # Sum the STORED points, treating NULL as 0 — exactly like
+        # SUM(COALESCE(p.pontos, 0)) in the SQL query.
+        pontos = _normalize_stored_points(p.get("pontos"))
 
         usuario = usuarios.setdefault(
             uid,
@@ -196,14 +249,13 @@ def get_ranking() -> list[dict]:
                 "pontos_totais": 0,
             },
         )
-
         usuario["pontos_totais"] += pontos
 
-    ranking = sorted(
-        usuarios.values(),
-        key=lambda u: (u["pontos_totais"], u["user_id"]),
-        reverse=True,
-    )
+    # Match the SQL ordering: pontos_totais DESC, then utilizador_id ASC.
+    # Python's sort is stable, so sort by the ascending tiebreak first, then
+    # by points descending.
+    ranking = sorted(usuarios.values(), key=lambda u: str(u["user_id"]))
+    ranking.sort(key=lambda u: u["pontos_totais"], reverse=True)
 
     return ranking
 
