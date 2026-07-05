@@ -6,9 +6,6 @@ from zoneinfo import ZoneInfo
 
 from database.supabase_client import get_supabase_client
 
-# Matches excluded from the ranking — points are always zero for these game IDs.
-JOGOS_EXCLUIDOS_RANKING: frozenset[int] = frozenset({1, 2})
-
 # Timezone in which jogos.hora_jogo is expressed. Change if your kickoff times
 # are stored in another zone (this MUST match the SQL cleanup query).
 LIGA_TIMEZONE = ZoneInfo("Europe/Lisbon")
@@ -140,38 +137,36 @@ def atualizar_pontos_jogo(jogo_id: int, r_casa: int | None, r_fora: int | None, 
 
 
 def get_ranking() -> list[dict]:
-    """Compila o ranking baseado em todos os palpites e resultados reais.
+    """Build the leaderboard from the stored points in palpites for finished matches.
 
-    Returns a list of dicts with keys:
-    - user_id, nome, pontos_totais, palpites (list of per-game details)
-
-    Also attempts to read an optional `resultado_macro` table to obtain the
-    real `vencedor_mundial` and `melhor_marcador` — if missing, bonuses are not applied.
+    The ranking is computed from the real `pontos` values already saved in the
+    `palpites` table for each prediction. Only matches that already have an
+    official result in `jogos` are included.
     """
     client = get_supabase_client()
 
-    # Load matches with real results
     jogos_resp = client.table("jogos").select(
-        "id, equipa_casa, equipa_fora, golos_casa_real, golos_fora_real, fase, jornada, data"
+        "id, equipa_casa, equipa_fora, golos_casa_real, golos_fora_real, fase, jornada"
     ).execute()
     jogos = {row["id"]: row for row in (jogos_resp.data or [])}
 
-    # Load all predictions with their persisted points and row ids so ranking
-    # can use stored values and backfill missing ones for finished matches.
+    finished_ids = {
+        row["id"]
+        for row in (jogos_resp.data or [])
+        if row.get("golos_casa_real") is not None and row.get("golos_fora_real") is not None
+    }
+
     palpites_resp = client.table("palpites").select(
         "id, utilizador_id, jogo_id, golos_casa_palpite, golos_fora_palpite, pontos"
     ).execute()
     palpites = palpites_resp.data or []
 
-    # Load profiles to map names
     perfis_resp = client.table("perfis").select("id, username").execute()
     perfis = {row["id"]: row.get("username") or row["id"] for row in (perfis_resp.data or [])}
 
-    # Load macro predictions per user (vencedor_mundial, melhor_marcador)
     macro_resp = client.table("palpites_macro").select("user_id, vencedor_mundial, melhor_marcador").execute()
     macros = {row["user_id"]: row for row in (macro_resp.data or [])}
 
-    # Attempt to obtain official macro result (optional)
     vencedor_real = None
     melhor_marcador_real = None
     try:
@@ -180,24 +175,21 @@ def get_ranking() -> list[dict]:
             vencedor_real = res_macro.data[0].get("vencedor_mundial")
             melhor_marcador_real = res_macro.data[0].get("melhor_marcador")
     except Exception:
-        # tabela opcional não existe ou erro — ignora bónus
         vencedor_real = None
         melhor_marcador_real = None
 
-    # Aggregate points per user
     usuarios: dict[str, dict] = {}
 
     for p in palpites:
         uid = p.get("utilizador_id")
         jogo_id = p.get("jogo_id")
-        if uid is None or jogo_id is None:
-            continue
-        jogo = jogos.get(jogo_id)
-        # só conta jogos com resultado real
-        if not jogo or jogo.get("golos_casa_real") is None or jogo.get("golos_fora_real") is None:
+        if uid is None or jogo_id is None or jogo_id not in finished_ids:
             continue
 
-        # null golos => "no prediction"; kept as None instead of being skipped.
+        jogo = jogos.get(jogo_id)
+        if not jogo:
+            continue
+
         p_casa = _to_int_or_none(p.get("golos_casa_palpite"))
         p_fora = _to_int_or_none(p.get("golos_fora_palpite"))
         tem_palpite = _tem_palpite(p_casa, p_fora)
@@ -205,20 +197,23 @@ def get_ranking() -> list[dict]:
         r_casa = _to_int_or_none(jogo.get("golos_casa_real"))
         r_fora = _to_int_or_none(jogo.get("golos_fora_real"))
         if r_casa is None or r_fora is None:
-            # real result not a clean integer — skip
             continue
 
-        # Ranking is based directly on the stored points column in palpite rows.
         pontos_salvos = p.get("pontos")
-        if pontos_salvos is not None:
-            try:
-                pontos = int(pontos_salvos)
-            except (TypeError, ValueError):
-                pontos = 0
-        else:
+        try:
+            pontos = int(pontos_salvos) if pontos_salvos is not None else 0
+        except (TypeError, ValueError):
             pontos = 0
 
-        usuario = usuarios.setdefault(uid, {"user_id": uid, "nome": perfis.get(uid, uid), "pontos_totais": 0, "palpites": []})
+        usuario = usuarios.setdefault(
+            uid,
+            {
+                "user_id": uid,
+                "nome": perfis.get(uid, uid),
+                "pontos_totais": 0,
+                "palpites": [],
+            },
+        )
 
         usuario["pontos_totais"] += pontos
         usuario["palpites"].append(
@@ -236,7 +231,6 @@ def get_ranking() -> list[dict]:
             }
         )
 
-    # Apply macro bonuses per user
     for uid, usuario in usuarios.items():
         macro = macros.get(uid)
         if not macro:
@@ -249,13 +243,10 @@ def get_ranking() -> list[dict]:
         usuario["pontos_totais"] += bonus
         usuario["bonus_aplicado"] = bonus
 
-    # Order each user's per-game details by match ID
     for usuario in usuarios.values():
         usuario["palpites"].sort(key=lambda d: d.get("jogo_id") or 0)
 
-    # Convert to sorted list
-    ranking = sorted(usuarios.values(), key=lambda u: u["pontos_totais"], reverse=True)
-    return ranking
+    return sorted(usuarios.values(), key=lambda u: u["pontos_totais"], reverse=True)
 
 
 def submeter_palpite(
