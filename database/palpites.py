@@ -496,21 +496,22 @@ def get_palpites_por_jogo() -> dict[int, list[dict]]:
     """
     client = get_supabase_client()
 
-    # Load all predictions
-    palpites_resp = client.table("palpites").select(
-        "utilizador_id, jogo_id, golos_casa_palpite, golos_fora_palpite"
-    ).execute()
-    palpites = palpites_resp.data or []
+    # Load ALL predictions, paginated. A single request is capped at 1000 rows,
+    # so without paging some users silently disappear from a match's "others'
+    # predictions" list (and from its count) once the table passes 1000 rows.
+    palpites = _fetch_all(
+        client,
+        "palpites",
+        "utilizador_id, jogo_id, golos_casa_palpite, golos_fora_palpite",
+    )
 
     # Load matches (we only need IDs and real results here)
-    jogos_resp = client.table("jogos").select(
-        "id, golos_casa_real, golos_fora_real"
-    ).execute()
-    jogos = {row["id"]: row for row in (jogos_resp.data or [])}
+    jogos_rows = _fetch_all(client, "jogos", "id, golos_casa_real, golos_fora_real")
+    jogos = {row["id"]: row for row in jogos_rows}
 
     # Load profiles to map names
-    perfis_resp = client.table("perfis").select("id, username").execute()
-    perfis = {row["id"]: row.get("username") or row["id"] for row in (perfis_resp.data or [])}
+    perfis_rows = _fetch_all(client, "perfis", "id, username")
+    perfis = {row["id"]: row.get("username") or row["id"] for row in perfis_rows}
 
     result: dict[int, list[dict]] = {}
     for p in palpites:
