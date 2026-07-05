@@ -208,22 +208,15 @@ def get_ranking() -> list[dict]:
             # real result not a clean integer — skip
             continue
 
-        # Prefer the persisted per-match points when available; fall back to
-        # recomputing from the official result if the row has not been backfilled.
+        # Ranking is based directly on the stored points column in palpite rows.
         pontos_salvos = p.get("pontos")
         if pontos_salvos is not None:
             try:
                 pontos = int(pontos_salvos)
             except (TypeError, ValueError):
                 pontos = 0
-        elif jogo_id in JOGOS_EXCLUIDOS_RANKING or not tem_palpite:
-            pontos = 0
         else:
-            pontos = calcular_pontos_jogo(p_casa, p_fora, r_casa, r_fora)
-            try:
-                client.table("palpites").update({"pontos": pontos}).eq("id", p["id"]).execute()
-            except Exception:
-                pass
+            pontos = 0
 
         usuario = usuarios.setdefault(uid, {"user_id": uid, "nome": perfis.get(uid, uid), "pontos_totais": 0, "palpites": []})
 

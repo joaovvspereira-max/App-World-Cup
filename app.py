@@ -924,16 +924,8 @@ def renderizar_admin() -> None:
             except Exception as exc:
                 st.error(f"Error saving result: {exc}")
             else:
-                # After saving the official result, update all user predictions for this match with calculated points
-                try:
-                    palpites_resp = client.table("palpites").select("id, utilizador_id, golos_casa_palpite, golos_fora_palpite").eq("jogo_id", jogo["id"]).execute()
-                    palpites_list = palpites_resp.data or []
-                except Exception as exc:
-                    st.warning(f"Result saved but failed to load predictions for scoring: {exc}")
-                    st.rerun()
-
+                # After saving the official result, update all user predictions for this match with calculated points.
                 updated = atualizar_pontos_jogo(jogo["id"], int(golos_casa), int(golos_fora), client=client)
-
                 st.success(f"Result saved and updated {updated} prediction(s) with points.")
                 st.rerun()
                 st.experimental_rerun()
