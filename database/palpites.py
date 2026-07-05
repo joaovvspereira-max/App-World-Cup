@@ -62,6 +62,29 @@ def _carregar_kickoffs(client, ids: list[int]) -> dict[int, datetime | None]:
     }
 
 
+def _normalize_stored_points(value: Any) -> int:
+    """Convert stored pontos to an integer total, defaulting to zero."""
+    if value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _calculate_points_for_finished_prediction(
+    palpite: dict[str, Any], jogo: dict[str, Any]
+) -> int:
+    """Recompute the points for a finished prediction from stored values."""
+    p_casa = _to_int_or_none(palpite.get("golos_casa_palpite"))
+    p_fora = _to_int_or_none(palpite.get("golos_fora_palpite"))
+    r_casa = _to_int_or_none(jogo.get("golos_casa_real"))
+    r_fora = _to_int_or_none(jogo.get("golos_fora_real"))
+    if p_casa is None or p_fora is None:
+        return 0
+    return calcular_pontos_jogo(p_casa, p_fora, r_casa, r_fora)
+
+
 def calcular_pontos_jogo(
     p_casa: int | None,
     p_fora: int | None,
@@ -140,21 +163,27 @@ def get_ranking() -> list[dict]:
     """Build the leaderboard exactly as the raw SQL aggregation query.
 
     This function returns a list of users with their total stored points from
-    finished matches only.
+    finished matches only. If stored pontos are stale, it recomputes them from
+    the prediction and official result so the standings stay accurate.
     """
     client = get_supabase_client()
 
     jogos_resp = client.table("jogos").select("id, golos_casa_real, golos_fora_real").execute()
-    finished_jogo_ids = {
-        row["id"]
+    finished_jogos = [
+        row
         for row in (jogos_resp.data or [])
         if row.get("golos_casa_real") is not None and row.get("golos_fora_real") is not None
-    }
+    ]
+    finished_jogo_ids = [row["id"] for row in finished_jogos]
+    jogos_por_id = {row["id"]: row for row in finished_jogos}
+
+    if not finished_jogo_ids:
+        return []
 
     palpites_resp = (
         client.table("palpites")
-        .select("utilizador_id, jogo_id, pontos")
-        .in_("jogo_id", list(finished_jogo_ids))
+        .select("id, utilizador_id, jogo_id, golos_casa_palpite, golos_fora_palpite, pontos")
+        .in_("jogo_id", finished_jogo_ids)
         .execute()
     )
     palpites = palpites_resp.data or []
@@ -163,17 +192,27 @@ def get_ranking() -> list[dict]:
     perfis = {row["id"]: row.get("username") or row["id"] for row in (perfis_resp.data or [])}
 
     usuarios: dict[str, dict] = {}
+    stale_updates: list[tuple[int, int]] = []
 
     for p in palpites:
         uid = p.get("utilizador_id")
-        if uid is None:
+        jogo_id = p.get("jogo_id")
+        if uid is None or jogo_id is None:
+            continue
+
+        jogo = jogos_por_id.get(jogo_id)
+        if jogo is None:
             continue
 
         pontos_salvos = p.get("pontos")
-        try:
-            pontos = int(pontos_salvos) if pontos_salvos is not None else 0
-        except (TypeError, ValueError):
-            pontos = 0
+        pontos_stored = _normalize_stored_points(pontos_salvos)
+        pontos_calculated = _calculate_points_for_finished_prediction(p, jogo)
+
+        if pontos_stored != pontos_calculated:
+            stale_updates.append((p["id"], pontos_calculated))
+            pontos = pontos_calculated
+        else:
+            pontos = pontos_stored
 
         usuario = usuarios.setdefault(
             uid,
@@ -185,6 +224,12 @@ def get_ranking() -> list[dict]:
         )
 
         usuario["pontos_totais"] += pontos
+
+    for palpite_id, pontos in stale_updates:
+        try:
+            client.table("palpites").update({"pontos": pontos}).eq("id", palpite_id).execute()
+        except Exception:
+            continue
 
     ranking = sorted(
         usuarios.values(),
