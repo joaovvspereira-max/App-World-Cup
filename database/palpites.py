@@ -18,8 +18,9 @@ SEM_PALPITE_MSG = "0 points. No prediction was made for this match"
 # Empty by default: no matches are excluded.
 JOGOS_EXCLUIDOS_RANKING: frozenset[int] = frozenset()
 
-# PostgREST returns at most this many rows per request by default. Any query
-# whose result can exceed it MUST be paginated, or rows are silently dropped.
+# PostgREST caps how many rows a single request returns. The exact cap depends
+# on the project's `max-rows` setting (commonly 1000, but sometimes lower), so
+# we never assume it: we page until a request comes back empty.
 _PAGE_SIZE = 1000
 
 
@@ -32,13 +33,20 @@ def _fetch_all(
     order_col: str = "id",
     page_size: int = _PAGE_SIZE,
 ) -> list[dict[str, Any]]:
-    """Fetch EVERY row of a query, paging past PostgREST's default row cap.
+    """Fetch EVERY row of a query, paging past PostgREST's row cap.
 
-    A single ``.execute()`` returns at most ``page_size`` rows (Supabase's
-    default is 1000). Summing points from a truncated result silently
-    undercounts users, so anything that can exceed the cap must page through
-    all rows. ``filtro`` is an optional callable that receives the query
-    builder and returns it with extra filters applied.
+    A single ``.execute()`` returns at most the server's ``max-rows`` (often
+    1000, sometimes lower). Summing points — or listing predictions — from a
+    truncated result silently drops data, so anything that can exceed the cap
+    must page through all rows.
+
+    Robust to any cap: each loop advances by the number of rows actually
+    returned (not by ``page_size``) and stops only when a page comes back
+    empty. This avoids the trap where a project whose cap is *below*
+    ``page_size`` makes the first page look "final" and ends paging too early.
+
+    ``filtro`` is an optional callable that receives the query builder and
+    returns it with extra filters applied (e.g. ``lambda q: q.eq("jogo_id", 5)``).
     """
     rows: list[dict[str, Any]] = []
     start = 0
@@ -50,10 +58,10 @@ def _fetch_all(
         query = query.order(order_col).range(start, start + page_size - 1)
         resp = query.execute()
         batch = resp.data or []
-        rows.extend(batch)
-        if len(batch) < page_size:
+        if not batch:
             break
-        start += page_size
+        rows.extend(batch)
+        start += len(batch)
     return rows
 
 

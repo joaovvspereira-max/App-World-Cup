@@ -1189,21 +1189,33 @@ def renderizar_formulario_palpites(jogos: list[dict[str, Any]]) -> None:
                             # show centered English text with larger font
                             st.markdown(f'<p class="resultado-real">Actual result: {int(r_casa)}-{int(r_fora)}<br>+{pontos_palpite} points</p>', unsafe_allow_html=True)
 
-                        # Dropdown showing other users' predictions for this match
-                        outras = [
-                            p for p in palpites_por_jogo.get(jogo_id, [])
-                            if p.get("user_id") != st.session_state.user_id
-                        ]
-                        if outras:
-                            with st.expander(f"👥 See others' predictions ({len(outras)})"):
-                                df_outras = pd.DataFrame(outras)
-                                df_outras = df_outras[["nome", "palpite", "pontos"]]
-                                df_outras = df_outras.rename(columns={
-                                    "nome": "Name",
-                                    "palpite": "Prediction",
-                                    "pontos": "Points",
-                                })
-                                st.table(df_outras)
+                    # Dropdown showing other users' predictions for THIS match.
+                    # Rendered for every match (not just finished ones) so the
+                    # menu is always available. Points are only shown once the
+                    # match has a real result; before that they are omitted.
+                    outras = [
+                        p for p in palpites_por_jogo.get(jogo_id, [])
+                        if p.get("user_id") != st.session_state.user_id
+                    ]
+                    if outras:
+                        jogo_terminado = (
+                            jogo.get("golos_casa_real") is not None
+                            and jogo.get("golos_fora_real") is not None
+                        )
+                        with st.expander(f"👥 See others' predictions ({len(outras)})"):
+                            df_outras = pd.DataFrame(outras)
+                            colunas = (
+                                ["nome", "palpite", "pontos"]
+                                if jogo_terminado
+                                else ["nome", "palpite"]
+                            )
+                            df_outras = df_outras[colunas]
+                            df_outras = df_outras.rename(columns={
+                                "nome": "Name",
+                                "palpite": "Prediction",
+                                "pontos": "Points",
+                            })
+                            st.table(df_outras)
                     # do not render extra spacer when result exists
                     st.markdown('</div>', unsafe_allow_html=True)
 
