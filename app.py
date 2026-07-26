@@ -25,6 +25,15 @@ from database.palpites import (
     calcular_pontos_jogo,
     atualizar_pontos_jogo,
 )
+from database.palpites_macro import (
+    JOGADORES_ELITE,
+    OPCAO_OUTRO,
+    PAISES_ELITE,
+    get_palpite_macro,
+    get_todos_palpites_macro,
+    get_resultado_macro,
+    guardar_resultado_macro,
+)
 import os
 from pathlib import Path
 
@@ -898,6 +907,51 @@ def renderizar_admin() -> None:
                 st.success(f"Result saved and updated {updated} prediction(s) with points.")
                 st.rerun()
                 st.experimental_rerun()
+
+    # ---- Special predictions — official results --------------------------
+    st.markdown("---")
+    st.markdown("**Special predictions — official results**")
+
+    try:
+        resultado_macro = get_resultado_macro()
+    except Exception as exc:
+        st.error(f"Could not load special-prediction results: {exc}")
+        resultado_macro = None
+
+    idx_venc, outro_venc = preparar_opcao_selectbox(
+        resultado_macro.get("vencedor_mundial") if resultado_macro else None,
+        PAISES_ELITE,
+    )
+    idx_marc, outro_marc = preparar_opcao_selectbox(
+        resultado_macro.get("melhor_marcador") if resultado_macro else None,
+        JOGADORES_ELITE,
+    )
+
+    with st.form("form_resultado_macro"):
+        venc_sel = st.selectbox("Actual World Cup winner", PAISES_ELITE, index=idx_venc)
+        venc_outro = st.text_input(
+            "…or a custom winner (used only if 'Other...' is selected above)",
+            value=outro_venc,
+            placeholder="Type the country name",
+        )
+        marc_sel = st.selectbox("Actual top scorer", JOGADORES_ELITE, index=idx_marc)
+        marc_outro = st.text_input(
+            "…or a custom top scorer (used only if 'Other...' is selected above)",
+            value=outro_marc,
+            placeholder="Type the player name",
+        )
+        guardar_macro = st.form_submit_button("Save special-prediction results")
+
+    if guardar_macro:
+        vencedor = resolver_valor_previsao(venc_sel, venc_outro)
+        marcador = resolver_valor_previsao(marc_sel, marc_outro)
+        try:
+            guardar_resultado_macro(vencedor, marcador)
+        except Exception as exc:
+            st.error(f"Error saving results: {exc}")
+        else:
+            st.success("Special-prediction results saved.")
+            st.rerun()
 
     # Persistent edit-teams form for matches with id > 72
     try:

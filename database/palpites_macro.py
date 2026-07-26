@@ -121,3 +121,35 @@ def get_todos_palpites_macro() -> list[dict[str, Any]]:
     # Stable display order: alphabetical by name.
     resultado.sort(key=lambda x: str(x.get("nome") or "").lower())
     return resultado
+
+def get_resultado_macro() -> dict[str, Any] | None:
+    """Load the single official special-predictions result row (if set)."""
+    client = get_supabase_client()
+    response = (
+        client.table("resultados_macro")
+        .select("id, vencedor_mundial, melhor_marcador, atualizado_em")
+        .eq("id", 1)
+        .limit(1)
+        .execute()
+    )
+    return response.data[0] if response.data else None
+
+
+def guardar_resultado_macro(
+    vencedor_mundial: str | None,
+    melhor_marcador: str | None,
+) -> dict[str, Any]:
+    """Insert or update the official special-predictions results (single row)."""
+    client = get_supabase_client()
+    payload = {
+        "id": 1,
+        "vencedor_mundial": (vencedor_mundial or "").strip() or None,
+        "melhor_marcador": (melhor_marcador or "").strip() or None,
+        "atualizado_em": datetime.now(timezone.utc).isoformat(),
+    }
+    response = (
+        client.table("resultados_macro")
+        .upsert(payload, on_conflict="id")
+        .execute()
+    )
+    return response.data[0] if response.data else payload

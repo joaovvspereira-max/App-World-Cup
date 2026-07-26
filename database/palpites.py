@@ -13,6 +13,9 @@ LIGA_TIMEZONE = ZoneInfo("Europe/Lisbon")
 # Message shown for a finished match where the user made no prediction.
 SEM_PALPITE_MSG = "0 points. No prediction was made for this match"
 
+# Points awarded for each correct special ("macro") prediction.
+PONTOS_BONUS_MACRO = 50
+
 # Match IDs that should never award points in the schedule/ranking views.
 # (Used by get_palpites_por_jogo.) Add jogo_id values here to exclude them.
 # Empty by default: no matches are excluded.
@@ -80,6 +83,22 @@ def _to_int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+    
+
+def _normalize_macro(value: Any) -> str:
+    """Normalize a macro pick for comparison: strip, casefold, drop accents.
+
+    Both the official result and the user picks come from the same dropdowns in
+    the normal case, so they match exactly; this only adds robustness for custom
+    'Other...' entries typed by hand (e.g. accent or casing differences).
+    """
+    import unicodedata
+
+    if value is None:
+        return ""
+    text = unicodedata.normalize("NFKD", str(value).strip())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text.casefold()
 
 
 def _kickoff_datetime(data: Any, hora: Any) -> datetime | None:
@@ -198,16 +217,18 @@ def atualizar_pontos_jogo(jogo_id: int, r_casa: int | None, r_fora: int | None, 
 
 
 def get_ranking() -> list[dict]:
-    """Build the leaderboard exactly as the raw SQL aggregation query.
+    """Build the leaderboard: stored match points + special-prediction bonuses.
 
-    This function returns a list of users with their total stored points from
-    finished matches only. If stored pontos are stale, it recomputes them from
-    the prediction and official result so the standings stay accurate.
+    Match points come from summing stored `palpites.pontos` on finished matches
+    only (NULL treated as 0). On top of that, each user earns
+    `PONTOS_BONUS_MACRO` points for a correct World Cup winner and another
+    `PONTOS_BONUS_MACRO` for a correct top scorer, compared against the official
+    results in `resultados_macro`. The bonus is added into `pontos_totais` and
+    also surfaced separately as `bonus_aplicado` so the UI can annotate it.
     """
     client = get_supabase_client()
 
     # --- Finished matches only (both real goals present) --------------------
-    # Mirrors the SQL WHERE clause on jogos.
     jogos = _fetch_all(client, "jogos", "id, golos_casa_real, golos_fora_real")
     finished_jogo_ids = {
         row["id"]
@@ -216,15 +237,7 @@ def get_ranking() -> list[dict]:
         and row.get("golos_fora_real") is not None
     }
 
-    if not finished_jogo_ids:
-        return []
-
     # --- All predictions, paginated ----------------------------------------
-    # This is the critical fix: a single request is capped at 1000 rows, so a
-    # large pool of predictions was being silently truncated and everyone's
-    # total came out too low. We page through every row, then keep only those
-    # on finished matches (equivalent to the SQL JOIN + WHERE). Filtering in
-    # Python also avoids a huge `IN (...)` list in the request URL.
     palpites = _fetch_all(
         client, "palpites", "utilizador_id, jogo_id, pontos"
     )
@@ -237,6 +250,19 @@ def get_ranking() -> list[dict]:
 
     usuarios: dict[str, dict] = {}
 
+    def _get_usuario(uid: str) -> dict:
+        """Fetch/create a user's ranking entry (used by both scoring passes)."""
+        return usuarios.setdefault(
+            uid,
+            {
+                "user_id": uid,
+                "nome": perfis.get(uid, uid),
+                "pontos_totais": 0,
+                "bonus_aplicado": 0,
+            },
+        )
+
+    # --- Pass 1: match points (only finished matches count) -----------------
     for p in palpites:
         if p.get("jogo_id") not in finished_jogo_ids:
             continue
@@ -245,23 +271,55 @@ def get_ranking() -> list[dict]:
         if uid is None:
             continue
 
-        # Sum the STORED points, treating NULL as 0 — exactly like
-        # SUM(COALESCE(p.pontos, 0)) in the SQL query.
         pontos = _normalize_stored_points(p.get("pontos"))
-
-        usuario = usuarios.setdefault(
-            uid,
-            {
-                "user_id": uid,
-                "nome": perfis.get(uid, uid),
-                "pontos_totais": 0,
-            },
-        )
+        usuario = _get_usuario(uid)
         usuario["pontos_totais"] += pontos
 
+    # --- Pass 2: special-prediction bonuses ---------------------------------
+    # Only applied once the official results have been entered in the admin
+    # area. Users who ONLY made special predictions (no match palpites) are
+    # included here too, so they still appear in the standings.
+    try:
+        resultado_rows = _fetch_all(
+            client,
+            "resultados_macro",
+            "id, vencedor_mundial, melhor_marcador",
+        )
+        oficial = resultado_rows[0] if resultado_rows else None
+    except Exception:
+        oficial = None
+
+    if oficial:
+        venc_oficial = _normalize_macro(oficial.get("vencedor_mundial"))
+        marc_oficial = _normalize_macro(oficial.get("melhor_marcador"))
+
+        # Only bother loading user picks if at least one official result is set.
+        if venc_oficial or marc_oficial:
+            macro_rows = _fetch_all(
+                client,
+                "palpites_macro",
+                "user_id, vencedor_mundial, melhor_marcador",
+            )
+            for m in macro_rows:
+                uid = m.get("user_id")
+                if uid is None:
+                    continue
+
+                bonus = 0
+                if venc_oficial and _normalize_macro(m.get("vencedor_mundial")) == venc_oficial:
+                    bonus += PONTOS_BONUS_MACRO
+                if marc_oficial and _normalize_macro(m.get("melhor_marcador")) == marc_oficial:
+                    bonus += PONTOS_BONUS_MACRO
+
+                if bonus:
+                    usuario = _get_usuario(uid)
+                    usuario["pontos_totais"] += bonus
+                    usuario["bonus_aplicado"] += bonus
+
+    if not usuarios:
+        return []
+
     # Match the SQL ordering: pontos_totais DESC, then utilizador_id ASC.
-    # Python's sort is stable, so sort by the ascending tiebreak first, then
-    # by points descending.
     ranking = sorted(usuarios.values(), key=lambda u: str(u["user_id"]))
     ranking.sort(key=lambda u: u["pontos_totais"], reverse=True)
 
@@ -491,6 +549,62 @@ def guardar_palpites_em_lote(
 
     report["ok"] = len(report["failed"]) == 0
     return report
+
+def reparar_todos_pontos(client=None) -> dict[str, int]:
+    """Recompute and persist `pontos` for every prediction on every finished match.
+
+    This is the one-time backfill: it walks every match in `jogos` that already
+    has a real result and, for each one, recalculates `pontos` for every row in
+    `palpites` tied to it (using the same rules as `atualizar_pontos_jogo`) and
+    writes the value back to the DB. Use this to repair/backfill palpites whose
+    `pontos` column predates the points-persisting logic, or whenever stored
+    values might be stale for any other reason.
+
+    Returns:
+        {"processed": <finished matches examined>,
+         "updated": <palpites rows successfully written>,
+         "errors": <palpites rows that failed to update>}
+    """
+    if client is None:
+        client = get_supabase_client()
+
+    jogos = _fetch_all(client, "jogos", "id, golos_casa_real, golos_fora_real")
+    finished = [
+        j for j in jogos
+        if j.get("golos_casa_real") is not None and j.get("golos_fora_real") is not None
+    ]
+
+    stats = {"processed": 0, "updated": 0, "errors": 0}
+
+    for jogo in finished:
+        jogo_id = jogo["id"]
+        r_casa = _to_int_or_none(jogo.get("golos_casa_real"))
+        r_fora = _to_int_or_none(jogo.get("golos_fora_real"))
+        stats["processed"] += 1
+
+        # Paginated fetch — a single match's predictions are unlikely to
+        # exceed the row cap, but this keeps it safe as the user base grows.
+        palpites = _fetch_all(
+            client,
+            "palpites",
+            "id, golos_casa_palpite, golos_fora_palpite",
+            filtro=lambda q, jid=jogo_id: q.eq("jogo_id", jid),
+        )
+
+        for p in palpites:
+            try:
+                p_casa = _to_int_or_none(p.get("golos_casa_palpite"))
+                p_fora = _to_int_or_none(p.get("golos_fora_palpite"))
+                if p_casa is None or p_fora is None:
+                    pontos = 0
+                else:
+                    pontos = calcular_pontos_jogo(p_casa, p_fora, r_casa, r_fora)
+                client.table("palpites").update({"pontos": pontos}).eq("id", p["id"]).execute()
+                stats["updated"] += 1
+            except Exception:
+                stats["errors"] += 1
+
+    return stats
 
 
 def get_palpites_por_jogo() -> dict[int, list[dict]]:
